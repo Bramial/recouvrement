@@ -241,6 +241,7 @@ export default function Creances() {
                     <td className="p-3">
                       {isMovement ? <Badge variant="outline" className="text-xs">{f.type_document}</Badge> : f.type_document}
                     </td>
+                    <td className="p-3 text-right text-muted-foreground">{formatCurrency(f.montant)}</td>
                     <td className="p-3 text-right font-medium">{formatCurrency(f.solde_restant ?? f.montant)}</td>
                     <td className="p-3 text-muted-foreground">{f.date_echeance}</td>
                     <td className="p-3 text-center"><Badge className={badge.className}>{badge.label}</Badge></td>
