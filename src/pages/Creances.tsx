@@ -9,7 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { Search, Mail, Phone, AlertTriangle, Loader2 } from 'lucide-react';
+import { Search, Mail, Phone, AlertTriangle, Loader2, Archive, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Facture {
