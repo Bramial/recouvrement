@@ -53,6 +53,7 @@ export default function Clients() {
       archive: c.archive ?? false,
       facture_count: facStats[c.id]?.count || 0,
       total_du: facStats[c.id]?.total || 0,
+      total_original: facStats[c.id]?.totalOriginal || 0,
     })) as Client[];
 
     // Sort by total_du descending
