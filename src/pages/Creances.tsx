@@ -223,6 +223,14 @@ export default function Creances() {
           <Switch checked={showAllMovements} onCheckedChange={setShowAllMovements} id="show-all" />
           <Label htmlFor="show-all" className="text-sm whitespace-nowrap">Tous mouvements</Label>
         </div>
+        <Button
+          variant={showArchived ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setShowArchived(!showArchived)}
+        >
+          <Archive className="h-4 w-4 mr-1" />
+          {showArchived ? 'Voir actifs' : 'Archives'}
+        </Button>
       </div>
 
       <Card>
