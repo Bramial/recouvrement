@@ -75,6 +75,7 @@ export default function Creances() {
   const [paysFilter, setPaysFilter] = useState('all');
   const [retardFilter, setRetardFilter] = useState('all');
   const [showAllMovements, setShowAllMovements] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [sortField, setSortField] = useState<'retard' | 'montant' | 'nom'>('retard');
   const [sortAsc, setSortAsc] = useState(false);
   const [selected, setSelected] = useState<Facture | null>(null);
