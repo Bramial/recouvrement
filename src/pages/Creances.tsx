@@ -220,6 +220,7 @@ export default function Creances() {
                 <th className="text-left p-3">N° Facture</th>
                 <th className="text-left p-3">Type</th>
                 <th className="text-right p-3 cursor-pointer hover:bg-muted" onClick={() => toggleSort('montant')}>Montant {sortField === 'montant' && (sortAsc ? '↑' : '↓')}</th>
+                <th className="text-right p-3">Reste dû</th>
                 <th className="text-left p-3">Échéance</th>
                 <th className="text-center p-3 cursor-pointer hover:bg-muted" onClick={() => toggleSort('retard')}>Retard {sortField === 'retard' && (sortAsc ? '↑' : '↓')}</th>
                 <th className="text-left p-3">Pays</th>
