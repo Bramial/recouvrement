@@ -9,7 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { Search, Mail, Phone, AlertTriangle, Loader2 } from 'lucide-react';
+import { Search, Mail, Phone, AlertTriangle, Loader2, Archive, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Facture {
@@ -75,6 +75,7 @@ export default function Creances() {
   const [paysFilter, setPaysFilter] = useState('all');
   const [retardFilter, setRetardFilter] = useState('all');
   const [showAllMovements, setShowAllMovements] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [sortField, setSortField] = useState<'retard' | 'montant' | 'nom'>('retard');
   const [sortAsc, setSortAsc] = useState(false);
   const [selected, setSelected] = useState<Facture | null>(null);
@@ -94,8 +95,8 @@ export default function Creances() {
 
   const filtered = useMemo(() => {
     let res = factures;
-    // Filter out archived clients
-    res = res.filter(f => !f.clients?.archive);
+    // Filter by archive status
+    res = res.filter(f => showArchived ? !!f.clients?.archive : !f.clients?.archive);
     // By default show only FACT with solde > 0, unless toggle is on
     if (!showAllMovements) {
       res = res.filter(f => f.type_document === 'FACT' && (f.solde_restant ?? f.montant) > 0);
@@ -123,7 +124,20 @@ export default function Creances() {
       return sortAsc ? -cmp : cmp;
     });
     return res;
-  }, [factures, search, paysFilter, retardFilter, sortField, sortAsc, showAllMovements]);
+  }, [factures, search, paysFilter, retardFilter, sortField, sortAsc, showAllMovements, showArchived]);
+
+  const archiveClient = async (f: Facture, archive: boolean, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!f.client_id) return;
+    await supabase.from('clients').update({ archive }).eq('id', f.client_id);
+    // Update local state
+    setFactures(prev => prev.map(fac => 
+      fac.client_id === f.client_id 
+        ? { ...fac, clients: fac.clients ? { ...fac.clients, archive } : fac.clients } 
+        : fac
+    ));
+    toast.success(archive ? `${f.clients?.nom} archivé` : `${f.clients?.nom} restauré`);
+  };
 
   const openDetail = async (f: Facture) => {
     setSelected(f);
@@ -209,6 +223,14 @@ export default function Creances() {
           <Switch checked={showAllMovements} onCheckedChange={setShowAllMovements} id="show-all" />
           <Label htmlFor="show-all" className="text-sm whitespace-nowrap">Tous mouvements</Label>
         </div>
+        <Button
+          variant={showArchived ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setShowArchived(!showArchived)}
+        >
+          <Archive className="h-4 w-4 mr-1" />
+          {showArchived ? 'Voir actifs' : 'Archives'}
+        </Button>
       </div>
 
       <Card>
@@ -246,7 +268,7 @@ export default function Creances() {
                     <td className="p-3 text-muted-foreground">{f.date_echeance}</td>
                     <td className="p-3 text-center"><Badge className={badge.className}>{badge.label}</Badge></td>
                     <td className="p-3">{f.source}</td>
-                    <td className="p-3 text-center">
+                    <td className="p-3 text-center flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
                       {actionDef && ActionIcon ? (
                         <Button
                           size="sm"
@@ -261,6 +283,17 @@ export default function Creances() {
                       ) : !isMovement ? (
                         <span className="text-xs text-muted-foreground">—</span>
                       ) : null}
+                      {!isMovement && (
+                        showArchived ? (
+                          <Button size="sm" variant="ghost" className="text-xs gap-1" onClick={(e) => archiveClient(f, false, e)}>
+                            <RotateCcw className="h-3 w-3" />
+                          </Button>
+                        ) : (
+                          <Button size="sm" variant="ghost" className="text-xs gap-1 text-muted-foreground" onClick={(e) => archiveClient(f, true, e)}>
+                            <Archive className="h-3 w-3" />
+                          </Button>
+                        )
+                      )}
                     </td>
                   </tr>
                 );
