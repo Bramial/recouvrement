@@ -70,6 +70,7 @@ export type Database = {
       }
       clients: {
         Row: {
+          archive: boolean | null
           code_client: string
           conditions_paiement: string | null
           created_at: string | null
@@ -82,6 +83,7 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          archive?: boolean | null
           code_client: string
           conditions_paiement?: string | null
           created_at?: string | null
@@ -94,6 +96,7 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          archive?: boolean | null
           code_client?: string
           conditions_paiement?: string | null
           created_at?: string | null
