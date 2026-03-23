@@ -179,6 +179,7 @@ export default function ClientDetail() {
             <thead><tr className="border-b bg-muted/50">
               <th className="text-left p-3">N°</th>
               <th className="text-right p-3">Montant</th>
+              <th className="text-right p-3">Reste dû</th>
               <th className="text-left p-3">Échéance</th>
             </tr></thead>
             <tbody>
