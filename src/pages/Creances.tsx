@@ -258,7 +258,20 @@ export default function Creances() {
                 const ActionIcon = actionDef?.icon;
                 return (
                   <tr key={f.id} className={`border-b hover:bg-muted/30 cursor-pointer ${isMovement ? 'text-muted-foreground bg-muted/20' : ''}`} onClick={() => openDetail(f)}>
-                    <td className="p-3 font-medium">{f.clients?.nom}</td>
+                    <td className="p-3 font-medium" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-1">
+                        <span className="cursor-pointer" onClick={() => openDetail(f)}>{f.clients?.nom}</span>
+                        {showArchived ? (
+                          <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground" onClick={(e) => archiveClient(f, false, e)}>
+                            <RotateCcw className="h-3 w-3" />
+                          </Button>
+                        ) : (
+                          <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground" onClick={(e) => archiveClient(f, true, e)}>
+                            <Archive className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    </td>
                     <td className="p-3 text-muted-foreground">{f.numero_facture}</td>
                     <td className="p-3">
                       {isMovement ? <Badge variant="outline" className="text-xs">{f.type_document}</Badge> : f.type_document}
