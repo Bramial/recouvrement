@@ -22,6 +22,7 @@ interface Client {
   archive: boolean;
   facture_count?: number;
   total_du?: number;
+  total_original?: number;
 }
 
 export default function Clients() {
@@ -38,13 +39,14 @@ export default function Clients() {
     if (maxMois) facturesQuery = facturesQuery.eq('mois_extraction', maxMois);
     const { data: facturesData } = await facturesQuery;
 
-    const facStats: Record<string, { count: number; total: number }> = {};
+    const facStats: Record<string, { count: number; total: number; totalOriginal: number }> = {};
     (facturesData || []).forEach((f: any) => {
       // Only count FACT with positive solde_restant
       if (f.type_document !== 'FACT' || (f.solde_restant ?? f.montant) <= 0) return;
-      if (!facStats[f.client_id]) facStats[f.client_id] = { count: 0, total: 0 };
+      if (!facStats[f.client_id]) facStats[f.client_id] = { count: 0, total: 0, totalOriginal: 0 };
       facStats[f.client_id].count++;
       facStats[f.client_id].total += Number(f.solde_restant ?? f.montant ?? 0);
+      facStats[f.client_id].totalOriginal += Number(f.montant ?? 0);
     });
 
     const enriched = (clientsData || []).map((c: any) => ({
@@ -52,6 +54,7 @@ export default function Clients() {
       archive: c.archive ?? false,
       facture_count: facStats[c.id]?.count || 0,
       total_du: facStats[c.id]?.total || 0,
+      total_original: facStats[c.id]?.totalOriginal || 0,
     })) as Client[];
 
     // Sort by total_du descending
@@ -114,7 +117,8 @@ export default function Clients() {
                 <th className="text-left p-3">Nom</th>
                 <th className="text-left p-3">Pays</th>
                 <th className="text-right p-3">Factures</th>
-                <th className="text-right p-3">Total dû</th>
+                <th className="text-right p-3">Montant total</th>
+                <th className="text-right p-3">Reste dû</th>
                 <th className="text-left p-3">Conditions</th>
                 {!showArchived && <th className="text-center p-3">Exclu relance</th>}
                 <th className="text-center p-3">{showArchived ? 'Restaurer' : ''}</th>
@@ -130,6 +134,7 @@ export default function Clients() {
                   </td>
                   <td className="p-3"><Badge variant="secondary">{c.pays || '—'}</Badge></td>
                   <td className="p-3 text-right">{c.facture_count}</td>
+                  <td className="p-3 text-right text-muted-foreground">{formatCurrency(c.total_original || 0)}</td>
                   <td className="p-3 text-right font-medium">{formatCurrency(c.total_du || 0)}</td>
                   <td className="p-3 text-muted-foreground">{c.conditions_paiement}</td>
                   {!showArchived && (

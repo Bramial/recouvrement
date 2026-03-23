@@ -179,12 +179,14 @@ export default function ClientDetail() {
             <thead><tr className="border-b bg-muted/50">
               <th className="text-left p-3">N°</th>
               <th className="text-right p-3">Montant</th>
+              <th className="text-right p-3">Reste dû</th>
               <th className="text-left p-3">Échéance</th>
             </tr></thead>
             <tbody>
               {invoices.map(f => (
                 <tr key={f.id} className="border-b">
                   <td className="p-3">{f.numero_facture}</td>
+                  <td className="p-3 text-right text-muted-foreground">{formatCurrency(f.montant)}</td>
                   <td className="p-3 text-right font-medium">{formatCurrency(f.solde_restant ?? f.montant)}</td>
                   <td className="p-3">{f.date_echeance}</td>
                 </tr>

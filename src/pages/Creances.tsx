@@ -220,6 +220,7 @@ export default function Creances() {
                 <th className="text-left p-3">N° Facture</th>
                 <th className="text-left p-3">Type</th>
                 <th className="text-right p-3 cursor-pointer hover:bg-muted" onClick={() => toggleSort('montant')}>Montant {sortField === 'montant' && (sortAsc ? '↑' : '↓')}</th>
+                <th className="text-right p-3">Reste dû</th>
                 <th className="text-left p-3">Échéance</th>
                 <th className="text-center p-3 cursor-pointer hover:bg-muted" onClick={() => toggleSort('retard')}>Retard {sortField === 'retard' && (sortAsc ? '↑' : '↓')}</th>
                 <th className="text-left p-3">Pays</th>
@@ -240,6 +241,7 @@ export default function Creances() {
                     <td className="p-3">
                       {isMovement ? <Badge variant="outline" className="text-xs">{f.type_document}</Badge> : f.type_document}
                     </td>
+                    <td className="p-3 text-right text-muted-foreground">{formatCurrency(f.montant)}</td>
                     <td className="p-3 text-right font-medium">{formatCurrency(f.solde_restant ?? f.montant)}</td>
                     <td className="p-3 text-muted-foreground">{f.date_echeance}</td>
                     <td className="p-3 text-center"><Badge className={badge.className}>{badge.label}</Badge></td>
@@ -279,7 +281,8 @@ export default function Creances() {
               <div className="space-y-4 mt-4">
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <span className="text-muted-foreground">Client</span><span className="font-medium">{selected.clients?.nom}</span>
-                  <span className="text-muted-foreground">Montant</span><span className="font-medium">{formatCurrency(selected.solde_restant ?? selected.montant)}</span>
+                  <span className="text-muted-foreground">Montant original</span><span>{formatCurrency(selected.montant)}</span>
+                  <span className="text-muted-foreground">Reste dû</span><span className="font-medium">{formatCurrency(selected.solde_restant ?? selected.montant)}</span>
                   <span className="text-muted-foreground">Émission</span><span>{selected.date_emission}</span>
                   <span className="text-muted-foreground">Échéance</span><span>{selected.date_echeance}</span>
                   <span className="text-muted-foreground">Retard</span><span>{joursRetard(selected.date_echeance)}j</span>
