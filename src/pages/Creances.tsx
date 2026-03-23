@@ -60,8 +60,16 @@ const STATUT_LABELS: Record<string, string> = {
   a_faire: 'À faire', fait: 'Fait', ignore: 'Ignoré', reporte: 'Reporté',
 };
 
+function getActionType(joursRetard: number): { type: string; label: string; icon: typeof Mail } | null {
+  if (joursRetard > 30) return { type: 'mise_en_demeure_j30', label: 'Mise en demeure', icon: AlertTriangle };
+  if (joursRetard > 15) return { type: 'appel_j15', label: 'Appel J+15', icon: Phone };
+  if (joursRetard > 7) return { type: 'email_j7', label: 'Email J+7', icon: Mail };
+  return null;
+}
+
 export default function Creances() {
   const [factures, setFactures] = useState<Facture[]>([]);
+  const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [paysFilter, setPaysFilter] = useState('all');
