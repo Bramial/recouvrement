@@ -8,7 +8,9 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Search } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Search, Mail, Phone, AlertTriangle, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface Facture {
   id: string;
@@ -58,8 +60,16 @@ const STATUT_LABELS: Record<string, string> = {
   a_faire: 'À faire', fait: 'Fait', ignore: 'Ignoré', reporte: 'Reporté',
 };
 
+function getActionType(joursRetard: number): { type: string; label: string; icon: typeof Mail } | null {
+  if (joursRetard > 30) return { type: 'mise_en_demeure_j30', label: 'Mise en demeure', icon: AlertTriangle };
+  if (joursRetard > 15) return { type: 'appel_j15', label: 'Appel J+15', icon: Phone };
+  if (joursRetard > 7) return { type: 'email_j7', label: 'Email J+7', icon: Mail };
+  return null;
+}
+
 export default function Creances() {
   const [factures, setFactures] = useState<Facture[]>([]);
+  const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [paysFilter, setPaysFilter] = useState('all');
@@ -121,6 +131,46 @@ export default function Creances() {
     setActionsHistory((data || []) as unknown as ActionRelance[]);
   };
 
+  const generateAction = async (f: Facture, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const retard = joursRetard(f.date_echeance);
+    const actionDef = getActionType(retard);
+    if (!actionDef) return;
+
+    setGeneratingId(f.id);
+    const today = new Date().toISOString().split('T')[0];
+
+    // Check if an active action already exists for this invoice
+    const { data: existing } = await supabase
+      .from('actions_relance')
+      .select('id')
+      .eq('facture_id', f.id)
+      .eq('type_action', actionDef.type)
+      .eq('statut', 'a_faire')
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      toast.warning('Une action de ce type existe déjà pour cette facture.');
+      setGeneratingId(null);
+      return;
+    }
+
+    const { error } = await supabase.from('actions_relance').insert({
+      facture_id: f.id,
+      client_id: f.client_id,
+      type_action: actionDef.type,
+      date_prevue: today,
+      statut: 'a_faire',
+    });
+
+    if (error) {
+      toast.error("Erreur lors de la création de l'action.");
+    } else {
+      toast.success(`Action "${actionDef.label}" créée pour ${f.clients?.nom}`);
+    }
+    setGeneratingId(null);
+  };
+
   const toggleSort = (field: typeof sortField) => {
     if (sortField === field) setSortAsc(!sortAsc);
     else { setSortField(field); setSortAsc(false); }
@@ -173,6 +223,7 @@ export default function Creances() {
                 <th className="text-left p-3">Échéance</th>
                 <th className="text-center p-3 cursor-pointer hover:bg-muted" onClick={() => toggleSort('retard')}>Retard {sortField === 'retard' && (sortAsc ? '↑' : '↓')}</th>
                 <th className="text-left p-3">Pays</th>
+                <th className="text-center p-3">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -180,6 +231,8 @@ export default function Creances() {
                 const retard = joursRetard(f.date_echeance);
                 const badge = retardBadge(retard);
                 const isMovement = f.type_document !== 'FACT';
+                const actionDef = !isMovement ? getActionType(retard) : null;
+                const ActionIcon = actionDef?.icon;
                 return (
                   <tr key={f.id} className={`border-b hover:bg-muted/30 cursor-pointer ${isMovement ? 'text-muted-foreground bg-muted/20' : ''}`} onClick={() => openDetail(f)}>
                     <td className="p-3 font-medium">{f.clients?.nom}</td>
@@ -191,6 +244,22 @@ export default function Creances() {
                     <td className="p-3 text-muted-foreground">{f.date_echeance}</td>
                     <td className="p-3 text-center"><Badge className={badge.className}>{badge.label}</Badge></td>
                     <td className="p-3">{f.source}</td>
+                    <td className="p-3 text-center">
+                      {actionDef && ActionIcon ? (
+                        <Button
+                          size="sm"
+                          variant={actionDef.type === 'mise_en_demeure_j30' ? 'destructive' : actionDef.type === 'appel_j15' ? 'outline' : 'default'}
+                          className="text-xs gap-1"
+                          disabled={generatingId === f.id}
+                          onClick={(e) => generateAction(f, e)}
+                        >
+                          {generatingId === f.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <ActionIcon className="h-3 w-3" />}
+                          {actionDef.label}
+                        </Button>
+                      ) : !isMovement ? (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      ) : null}
+                    </td>
                   </tr>
                 );
               })}
