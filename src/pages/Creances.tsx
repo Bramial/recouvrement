@@ -8,7 +8,9 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Search } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Search, Mail, Phone, AlertTriangle, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface Facture {
   id: string;
