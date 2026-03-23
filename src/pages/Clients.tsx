@@ -39,7 +39,7 @@ export default function Clients() {
     if (maxMois) facturesQuery = facturesQuery.eq('mois_extraction', maxMois);
     const { data: facturesData } = await facturesQuery;
 
-    const facStats: Record<string, { count: number; total: number }> = {};
+    const facStats: Record<string, { count: number; total: number; totalOriginal: number }> = {};
     (facturesData || []).forEach((f: any) => {
       // Only count FACT with positive solde_restant
       if (f.type_document !== 'FACT' || (f.solde_restant ?? f.montant) <= 0) return;
