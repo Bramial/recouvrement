@@ -22,6 +22,7 @@ interface Client {
   archive: boolean;
   facture_count?: number;
   total_du?: number;
+  total_original?: number;
 }
 
 export default function Clients() {
