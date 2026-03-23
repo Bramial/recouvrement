@@ -124,7 +124,20 @@ export default function Creances() {
       return sortAsc ? -cmp : cmp;
     });
     return res;
-  }, [factures, search, paysFilter, retardFilter, sortField, sortAsc, showAllMovements]);
+  }, [factures, search, paysFilter, retardFilter, sortField, sortAsc, showAllMovements, showArchived]);
+
+  const archiveClient = async (f: Facture, archive: boolean, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!f.client_id) return;
+    await supabase.from('clients').update({ archive }).eq('id', f.client_id);
+    // Update local state
+    setFactures(prev => prev.map(fac => 
+      fac.client_id === f.client_id 
+        ? { ...fac, clients: fac.clients ? { ...fac.clients, archive } : fac.clients } 
+        : fac
+    ));
+    toast.success(archive ? `${f.clients?.nom} archivé` : `${f.clients?.nom} restauré`);
+  };
 
   const openDetail = async (f: Facture) => {
     setSelected(f);
