@@ -95,8 +95,8 @@ export default function Creances() {
 
   const filtered = useMemo(() => {
     let res = factures;
-    // Filter out archived clients
-    res = res.filter(f => !f.clients?.archive);
+    // Filter by archive status
+    res = res.filter(f => showArchived ? !!f.clients?.archive : !f.clients?.archive);
     // By default show only FACT with solde > 0, unless toggle is on
     if (!showAllMovements) {
       res = res.filter(f => f.type_document === 'FACT' && (f.solde_restant ?? f.montant) > 0);
