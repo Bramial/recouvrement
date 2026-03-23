@@ -268,7 +268,7 @@ export default function Creances() {
                     <td className="p-3 text-muted-foreground">{f.date_echeance}</td>
                     <td className="p-3 text-center"><Badge className={badge.className}>{badge.label}</Badge></td>
                     <td className="p-3">{f.source}</td>
-                    <td className="p-3 text-center">
+                    <td className="p-3 text-center flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
                       {actionDef && ActionIcon ? (
                         <Button
                           size="sm"
@@ -283,6 +283,17 @@ export default function Creances() {
                       ) : !isMovement ? (
                         <span className="text-xs text-muted-foreground">—</span>
                       ) : null}
+                      {!isMovement && (
+                        showArchived ? (
+                          <Button size="sm" variant="ghost" className="text-xs gap-1" onClick={(e) => archiveClient(f, false, e)}>
+                            <RotateCcw className="h-3 w-3" />
+                          </Button>
+                        ) : (
+                          <Button size="sm" variant="ghost" className="text-xs gap-1 text-muted-foreground" onClick={(e) => archiveClient(f, true, e)}>
+                            <Archive className="h-3 w-3" />
+                          </Button>
+                        )
+                      )}
                     </td>
                   </tr>
                 );
