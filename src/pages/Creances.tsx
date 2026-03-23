@@ -223,6 +223,7 @@ export default function Creances() {
                 <th className="text-left p-3">Échéance</th>
                 <th className="text-center p-3 cursor-pointer hover:bg-muted" onClick={() => toggleSort('retard')}>Retard {sortField === 'retard' && (sortAsc ? '↑' : '↓')}</th>
                 <th className="text-left p-3">Pays</th>
+                <th className="text-center p-3">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -230,6 +231,8 @@ export default function Creances() {
                 const retard = joursRetard(f.date_echeance);
                 const badge = retardBadge(retard);
                 const isMovement = f.type_document !== 'FACT';
+                const actionDef = !isMovement ? getActionType(retard) : null;
+                const ActionIcon = actionDef?.icon;
                 return (
                   <tr key={f.id} className={`border-b hover:bg-muted/30 cursor-pointer ${isMovement ? 'text-muted-foreground bg-muted/20' : ''}`} onClick={() => openDetail(f)}>
                     <td className="p-3 font-medium">{f.clients?.nom}</td>
@@ -241,6 +244,22 @@ export default function Creances() {
                     <td className="p-3 text-muted-foreground">{f.date_echeance}</td>
                     <td className="p-3 text-center"><Badge className={badge.className}>{badge.label}</Badge></td>
                     <td className="p-3">{f.source}</td>
+                    <td className="p-3 text-center">
+                      {actionDef && ActionIcon ? (
+                        <Button
+                          size="sm"
+                          variant={actionDef.type === 'mise_en_demeure_j30' ? 'destructive' : actionDef.type === 'appel_j15' ? 'outline' : 'default'}
+                          className="text-xs gap-1"
+                          disabled={generatingId === f.id}
+                          onClick={(e) => generateAction(f, e)}
+                        >
+                          {generatingId === f.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <ActionIcon className="h-3 w-3" />}
+                          {actionDef.label}
+                        </Button>
+                      ) : !isMovement ? (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      ) : null}
+                    </td>
                   </tr>
                 );
               })}
