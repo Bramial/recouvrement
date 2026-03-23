@@ -114,7 +114,8 @@ export default function Clients() {
                 <th className="text-left p-3">Nom</th>
                 <th className="text-left p-3">Pays</th>
                 <th className="text-right p-3">Factures</th>
-                <th className="text-right p-3">Total dû</th>
+                <th className="text-right p-3">Montant total</th>
+                <th className="text-right p-3">Reste dû</th>
                 <th className="text-left p-3">Conditions</th>
                 {!showArchived && <th className="text-center p-3">Exclu relance</th>}
                 <th className="text-center p-3">{showArchived ? 'Restaurer' : ''}</th>
