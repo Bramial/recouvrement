@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { getMaxMoisExtraction } from '@/lib/supabaseHelpers';
 import { KPICard } from '@/components/KPICard';
 import { EmailModal } from '@/components/EmailModal';
 import { CallResultModal } from '@/components/CallResultModal';
@@ -8,7 +9,7 @@ import { NoteModal } from '@/components/NoteModal';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Euro, AlertTriangle, ListChecks, CheckCircle, Mail, Phone, FileWarning, Calendar, X, MessageSquare } from 'lucide-react';
+import { Euro, AlertTriangle, ListChecks, CheckCircle, Mail, Phone, Calendar, X, MessageSquare } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -23,7 +24,7 @@ interface Action {
   contenu_email: string | null;
   notes: string | null;
   factures: { numero_facture: string; montant: number; date_echeance: string; solde_restant: number | null } | null;
-  clients: { nom: string; email: string | null; telephone: string | null; code_client: string } | null;
+  clients: { nom: string; email: string | null; telephone: string | null; code_client: string; archive: boolean | null } | null;
 }
 
 interface Rapport {
@@ -78,13 +79,14 @@ export default function RapportDuJour() {
     setLoading(true);
     const [rapportRes, actionsRes] = await Promise.all([
       supabase.from('rapports_quotidiens').select('*').eq('date_rapport', today).maybeSingle(),
-      supabase.from('actions_relance').select('*, factures(numero_facture, montant, date_echeance, solde_restant), clients(nom, email, telephone, code_client)').eq('statut', 'a_faire').lte('date_prevue', today),
+      supabase.from('actions_relance').select('*, factures(numero_facture, montant, date_echeance, solde_restant), clients(nom, email, telephone, code_client, archive)').eq('statut', 'a_faire').lte('date_prevue', today),
     ]);
     setRapport(rapportRes.data as Rapport | null);
-    const sorted = ((actionsRes.data || []) as unknown as Action[]).sort(
-      (a, b) => (TYPE_ACTION_ORDER[a.type_action] ?? 9) - (TYPE_ACTION_ORDER[b.type_action] ?? 9)
-    );
-    setActions(sorted);
+    // Filter out archived clients
+    const allActions = ((actionsRes.data || []) as unknown as Action[])
+      .filter(a => !a.clients?.archive)
+      .sort((a, b) => (TYPE_ACTION_ORDER[a.type_action] ?? 9) - (TYPE_ACTION_ORDER[b.type_action] ?? 9));
+    setActions(allActions);
     setLoading(false);
   };
 

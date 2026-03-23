@@ -1,9 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { getMaxMoisExtraction } from '@/lib/supabaseHelpers';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Search } from 'lucide-react';
 
@@ -18,7 +21,7 @@ interface Facture {
   solde_restant: number | null;
   statut: string;
   source: string | null;
-  clients: { nom: string; code_client: string } | null;
+  clients: { nom: string; code_client: string; archive: boolean | null } | null;
 }
 
 interface ActionRelance {
@@ -61,18 +64,32 @@ export default function Creances() {
   const [search, setSearch] = useState('');
   const [paysFilter, setPaysFilter] = useState('all');
   const [retardFilter, setRetardFilter] = useState('all');
+  const [showAllMovements, setShowAllMovements] = useState(false);
   const [sortField, setSortField] = useState<'retard' | 'montant' | 'nom'>('retard');
   const [sortAsc, setSortAsc] = useState(false);
   const [selected, setSelected] = useState<Facture | null>(null);
   const [actionsHistory, setActionsHistory] = useState<ActionRelance[]>([]);
 
   useEffect(() => {
-    supabase.from('factures').select('*, clients(nom, code_client)').eq('statut', 'en_cours')
-      .then(({ data }) => { setFactures((data || []) as unknown as Facture[]); setLoading(false); });
+    const load = async () => {
+      const maxMois = await getMaxMoisExtraction();
+      let query = supabase.from('factures').select('*, clients(nom, code_client, archive)').eq('statut', 'en_cours');
+      if (maxMois) query = query.eq('mois_extraction', maxMois);
+      const { data } = await query;
+      setFactures((data || []) as unknown as Facture[]);
+      setLoading(false);
+    };
+    load();
   }, []);
 
   const filtered = useMemo(() => {
     let res = factures;
+    // Filter out archived clients
+    res = res.filter(f => !f.clients?.archive);
+    // By default show only FACT with solde > 0, unless toggle is on
+    if (!showAllMovements) {
+      res = res.filter(f => f.type_document === 'FACT' && (f.solde_restant ?? f.montant) > 0);
+    }
     if (paysFilter !== 'all') res = res.filter(f => f.source === paysFilter);
     if (search) {
       const s = search.toLowerCase();
@@ -96,7 +113,7 @@ export default function Creances() {
       return sortAsc ? -cmp : cmp;
     });
     return res;
-  }, [factures, search, paysFilter, retardFilter, sortField, sortAsc]);
+  }, [factures, search, paysFilter, retardFilter, sortField, sortAsc, showAllMovements]);
 
   const openDetail = async (f: Facture) => {
     setSelected(f);
@@ -138,6 +155,10 @@ export default function Creances() {
             <SelectItem value=">30">{'>  30 jours'}</SelectItem>
           </SelectContent>
         </Select>
+        <div className="flex items-center gap-2">
+          <Switch checked={showAllMovements} onCheckedChange={setShowAllMovements} id="show-all" />
+          <Label htmlFor="show-all" className="text-sm whitespace-nowrap">Tous mouvements</Label>
+        </div>
       </div>
 
       <Card>
@@ -158,11 +179,14 @@ export default function Creances() {
               {filtered.map((f) => {
                 const retard = joursRetard(f.date_echeance);
                 const badge = retardBadge(retard);
+                const isMovement = f.type_document !== 'FACT';
                 return (
-                  <tr key={f.id} className="border-b hover:bg-muted/30 cursor-pointer" onClick={() => openDetail(f)}>
+                  <tr key={f.id} className={`border-b hover:bg-muted/30 cursor-pointer ${isMovement ? 'text-muted-foreground bg-muted/20' : ''}`} onClick={() => openDetail(f)}>
                     <td className="p-3 font-medium">{f.clients?.nom}</td>
                     <td className="p-3 text-muted-foreground">{f.numero_facture}</td>
-                    <td className="p-3">{f.type_document}</td>
+                    <td className="p-3">
+                      {isMovement ? <Badge variant="outline" className="text-xs">{f.type_document}</Badge> : f.type_document}
+                    </td>
                     <td className="p-3 text-right font-medium">{formatCurrency(f.solde_restant ?? f.montant)}</td>
                     <td className="p-3 text-muted-foreground">{f.date_echeance}</td>
                     <td className="p-3 text-center"><Badge className={badge.className}>{badge.label}</Badge></td>
