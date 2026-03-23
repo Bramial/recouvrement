@@ -131,6 +131,46 @@ export default function Creances() {
     setActionsHistory((data || []) as unknown as ActionRelance[]);
   };
 
+  const generateAction = async (f: Facture, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const retard = joursRetard(f.date_echeance);
+    const actionDef = getActionType(retard);
+    if (!actionDef) return;
+
+    setGeneratingId(f.id);
+    const today = new Date().toISOString().split('T')[0];
+
+    // Check if an active action already exists for this invoice
+    const { data: existing } = await supabase
+      .from('actions_relance')
+      .select('id')
+      .eq('facture_id', f.id)
+      .eq('type_action', actionDef.type)
+      .eq('statut', 'a_faire')
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      toast.warning('Une action de ce type existe déjà pour cette facture.');
+      setGeneratingId(null);
+      return;
+    }
+
+    const { error } = await supabase.from('actions_relance').insert({
+      facture_id: f.id,
+      client_id: f.client_id,
+      type_action: actionDef.type,
+      date_prevue: today,
+      statut: 'a_faire',
+    });
+
+    if (error) {
+      toast.error("Erreur lors de la création de l'action.");
+    } else {
+      toast.success(`Action "${actionDef.label}" créée pour ${f.clients?.nom}`);
+    }
+    setGeneratingId(null);
+  };
+
   const toggleSort = (field: typeof sortField) => {
     if (sortField === field) setSortAsc(!sortAsc);
     else { setSortField(field); setSortAsc(false); }
