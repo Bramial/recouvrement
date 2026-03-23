@@ -14,7 +14,245 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      actions_relance: {
+        Row: {
+          client_id: string | null
+          contenu_email: string | null
+          created_at: string | null
+          date_executee: string | null
+          date_prevue: string
+          facture_id: string | null
+          id: string
+          notes: string | null
+          statut: string | null
+          type_action: string | null
+        }
+        Insert: {
+          client_id?: string | null
+          contenu_email?: string | null
+          created_at?: string | null
+          date_executee?: string | null
+          date_prevue: string
+          facture_id?: string | null
+          id?: string
+          notes?: string | null
+          statut?: string | null
+          type_action?: string | null
+        }
+        Update: {
+          client_id?: string | null
+          contenu_email?: string | null
+          created_at?: string | null
+          date_executee?: string | null
+          date_prevue?: string
+          facture_id?: string | null
+          id?: string
+          notes?: string | null
+          statut?: string | null
+          type_action?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "actions_relance_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "actions_relance_facture_id_fkey"
+            columns: ["facture_id"]
+            isOneToOne: false
+            referencedRelation: "factures"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      clients: {
+        Row: {
+          code_client: string
+          conditions_paiement: string | null
+          created_at: string | null
+          email: string | null
+          exclusion_relance: boolean | null
+          id: string
+          nom: string
+          pays: string | null
+          telephone: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          code_client: string
+          conditions_paiement?: string | null
+          created_at?: string | null
+          email?: string | null
+          exclusion_relance?: boolean | null
+          id?: string
+          nom: string
+          pays?: string | null
+          telephone?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          code_client?: string
+          conditions_paiement?: string | null
+          created_at?: string | null
+          email?: string | null
+          exclusion_relance?: boolean | null
+          id?: string
+          nom?: string
+          pays?: string | null
+          telephone?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      factures: {
+        Row: {
+          client_id: string | null
+          created_at: string | null
+          date_echeance: string
+          date_emission: string
+          derniere_apparition: string | null
+          id: string
+          mois_extraction: string | null
+          montant: number
+          numero_facture: string
+          premiere_apparition: string | null
+          solde_restant: number | null
+          source: string | null
+          statut: string | null
+          type_document: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          client_id?: string | null
+          created_at?: string | null
+          date_echeance: string
+          date_emission: string
+          derniere_apparition?: string | null
+          id?: string
+          mois_extraction?: string | null
+          montant: number
+          numero_facture: string
+          premiere_apparition?: string | null
+          solde_restant?: number | null
+          source?: string | null
+          statut?: string | null
+          type_document?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          client_id?: string | null
+          created_at?: string | null
+          date_echeance?: string
+          date_emission?: string
+          derniere_apparition?: string | null
+          id?: string
+          mois_extraction?: string | null
+          montant?: number
+          numero_facture?: string
+          premiere_apparition?: string | null
+          solde_restant?: number | null
+          source?: string | null
+          statut?: string | null
+          type_document?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "factures_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      imports: {
+        Row: {
+          date_import: string | null
+          erreurs: string | null
+          id: string
+          mois: string
+          nb_lignes_brutes: number | null
+          nb_lignes_parsees: number | null
+          nom_fichier: string
+          source: string | null
+          statut: string | null
+        }
+        Insert: {
+          date_import?: string | null
+          erreurs?: string | null
+          id?: string
+          mois: string
+          nb_lignes_brutes?: number | null
+          nb_lignes_parsees?: number | null
+          nom_fichier: string
+          source?: string | null
+          statut?: string | null
+        }
+        Update: {
+          date_import?: string | null
+          erreurs?: string | null
+          id?: string
+          mois?: string
+          nb_lignes_brutes?: number | null
+          nb_lignes_parsees?: number | null
+          nom_fichier?: string
+          source?: string | null
+          statut?: string | null
+        }
+        Relationships: []
+      }
+      rapports_quotidiens: {
+        Row: {
+          created_at: string | null
+          date_rapport: string
+          factures_payees_depuis_dernier: string | null
+          id: string
+          nb_actions_jour: number | null
+          nb_appels_j15: number | null
+          nb_emails_j7: number | null
+          nb_factures_en_cours: number | null
+          nb_mises_en_demeure_j30: number | null
+          nouvelles_factures: string | null
+          resume_ia: string | null
+          total_creances: number | null
+          total_en_retard: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          date_rapport: string
+          factures_payees_depuis_dernier?: string | null
+          id?: string
+          nb_actions_jour?: number | null
+          nb_appels_j15?: number | null
+          nb_emails_j7?: number | null
+          nb_factures_en_cours?: number | null
+          nb_mises_en_demeure_j30?: number | null
+          nouvelles_factures?: string | null
+          resume_ia?: string | null
+          total_creances?: number | null
+          total_en_retard?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          date_rapport?: string
+          factures_payees_depuis_dernier?: string | null
+          id?: string
+          nb_actions_jour?: number | null
+          nb_appels_j15?: number | null
+          nb_emails_j7?: number | null
+          nb_factures_en_cours?: number | null
+          nb_mises_en_demeure_j30?: number | null
+          nouvelles_factures?: string | null
+          resume_ia?: string | null
+          total_creances?: number | null
+          total_en_retard?: number | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

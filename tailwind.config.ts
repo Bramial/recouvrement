@@ -13,6 +13,9 @@ export default {
       },
     },
     extend: {
+      fontFamily: {
+        sans: ["'Plus Jakarta Sans'", "system-ui", "-apple-system", "sans-serif"],
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
@@ -57,6 +60,17 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        "badge-danger": "hsl(var(--badge-danger))",
+        "badge-danger-foreground": "hsl(var(--badge-danger-foreground))",
+        "badge-warning": "hsl(var(--badge-warning))",
+        "badge-warning-foreground": "hsl(var(--badge-warning-foreground))",
+        "badge-info": "hsl(var(--badge-info))",
+        "badge-info-foreground": "hsl(var(--badge-info-foreground))",
+        "badge-success": "hsl(var(--badge-success))",
+        "badge-success-foreground": "hsl(var(--badge-success-foreground))",
+        "ia-bg": "hsl(var(--ia-bg))",
+        "ia-border": "hsl(var(--ia-border))",
+        "ia-foreground": "hsl(var(--ia-foreground))",
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -65,20 +79,12 @@ export default {
       },
       keyframes: {
         "accordion-down": {
-          from: {
-            height: "0",
-          },
-          to: {
-            height: "var(--radix-accordion-content-height)",
-          },
+          from: { height: "0" },
+          to: { height: "var(--radix-accordion-content-height)" },
         },
         "accordion-up": {
-          from: {
-            height: "var(--radix-accordion-content-height)",
-          },
-          to: {
-            height: "0",
-          },
+          from: { height: "var(--radix-accordion-content-height)" },
+          to: { height: "0" },
         },
       },
       animation: {
