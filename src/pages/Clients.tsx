@@ -34,12 +34,14 @@ export default function Clients() {
   const fetchClients = async () => {
     const maxMois = await getMaxMoisExtraction();
     const { data: clientsData } = await supabase.from('clients').select('*');
-    let facturesQuery = supabase.from('factures').select('client_id, solde_restant, montant').eq('statut', 'en_cours');
+    let facturesQuery = supabase.from('factures').select('client_id, solde_restant, montant, type_document').eq('statut', 'en_cours');
     if (maxMois) facturesQuery = facturesQuery.eq('mois_extraction', maxMois);
     const { data: facturesData } = await facturesQuery;
 
     const facStats: Record<string, { count: number; total: number }> = {};
     (facturesData || []).forEach((f: any) => {
+      // Only count FACT with positive solde_restant
+      if (f.type_document !== 'FACT' || (f.solde_restant ?? f.montant) <= 0) return;
       if (!facStats[f.client_id]) facStats[f.client_id] = { count: 0, total: 0 };
       facStats[f.client_id].count++;
       facStats[f.client_id].total += Number(f.solde_restant ?? f.montant ?? 0);
@@ -51,6 +53,9 @@ export default function Clients() {
       facture_count: facStats[c.id]?.count || 0,
       total_du: facStats[c.id]?.total || 0,
     })) as Client[];
+
+    // Sort by total_du descending
+    enriched.sort((a, b) => (b.total_du || 0) - (a.total_du || 0));
 
     setClients(enriched);
     setLoading(false);
