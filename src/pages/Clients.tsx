@@ -42,9 +42,10 @@ export default function Clients() {
     (facturesData || []).forEach((f: any) => {
       // Only count FACT with positive solde_restant
       if (f.type_document !== 'FACT' || (f.solde_restant ?? f.montant) <= 0) return;
-      if (!facStats[f.client_id]) facStats[f.client_id] = { count: 0, total: 0 };
+      if (!facStats[f.client_id]) facStats[f.client_id] = { count: 0, total: 0, totalOriginal: 0 };
       facStats[f.client_id].count++;
       facStats[f.client_id].total += Number(f.solde_restant ?? f.montant ?? 0);
+      facStats[f.client_id].totalOriginal += Number(f.montant ?? 0);
     });
 
     const enriched = (clientsData || []).map((c: any) => ({
