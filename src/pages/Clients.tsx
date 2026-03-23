@@ -134,6 +134,7 @@ export default function Clients() {
                   </td>
                   <td className="p-3"><Badge variant="secondary">{c.pays || '—'}</Badge></td>
                   <td className="p-3 text-right">{c.facture_count}</td>
+                  <td className="p-3 text-right text-muted-foreground">{formatCurrency(c.total_original || 0)}</td>
                   <td className="p-3 text-right font-medium">{formatCurrency(c.total_du || 0)}</td>
                   <td className="p-3 text-muted-foreground">{c.conditions_paiement}</td>
                   {!showArchived && (

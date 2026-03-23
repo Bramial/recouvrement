@@ -281,7 +281,8 @@ export default function Creances() {
               <div className="space-y-4 mt-4">
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <span className="text-muted-foreground">Client</span><span className="font-medium">{selected.clients?.nom}</span>
-                  <span className="text-muted-foreground">Montant</span><span className="font-medium">{formatCurrency(selected.solde_restant ?? selected.montant)}</span>
+                  <span className="text-muted-foreground">Montant original</span><span>{formatCurrency(selected.montant)}</span>
+                  <span className="text-muted-foreground">Reste dû</span><span className="font-medium">{formatCurrency(selected.solde_restant ?? selected.montant)}</span>
                   <span className="text-muted-foreground">Émission</span><span>{selected.date_emission}</span>
                   <span className="text-muted-foreground">Échéance</span><span>{selected.date_echeance}</span>
                   <span className="text-muted-foreground">Retard</span><span>{joursRetard(selected.date_echeance)}j</span>
