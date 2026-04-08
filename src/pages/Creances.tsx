@@ -76,7 +76,6 @@ export default function Creances() {
   const [search, setSearch] = useState('');
   const { country } = useCountryFilter();
   const [retardFilter, setRetardFilter] = useState('all');
-  const [showPertes, setShowPertes] = useState(false);
   const [sortField, setSortField] = useState<'retard' | 'montant' | 'nom'>('retard');
   const [sortAsc, setSortAsc] = useState(false);
   const [showLitiges, setShowLitiges] = useState(false);
@@ -90,7 +89,7 @@ export default function Creances() {
     const load = async () => {
       const maxMois = await getMaxMoisExtraction();
       const joinType = country !== 'all' ? 'clients!inner' : 'clients';
-      let query = supabase.from('factures').select(`*, ${joinType}(nom, code_client, exclusion_relance)`).in('statut', ['en_cours', 'perte', 'litige', 'retention_dgd']);
+      let query = supabase.from('factures').select(`*, ${joinType}(nom, code_client, exclusion_relance)`).in('statut', ['en_cours', 'litige', 'retention_dgd']);
       if (maxMois) query = query.eq('mois_extraction', maxMois);
       if (country !== 'all') query = query.ilike('clients.code_client', `${country}_%`);
       query = query.order('date_echeance', { ascending: true });
@@ -106,8 +105,6 @@ export default function Creances() {
     // Filter by statut view mode
     if (showLitiges) {
       res = res.filter(f => f.statut === 'litige');
-    } else if (showPertes) {
-      res = res.filter(f => f.statut === 'perte');
     } else {
       res = res.filter(f => f.statut === 'en_cours' || f.statut === 'retention_dgd');
     }
@@ -134,7 +131,7 @@ export default function Creances() {
       return sortAsc ? -cmp : cmp;
     });
     return res;
-  }, [factures, search, retardFilter, sortField, sortAsc, showPertes, showLitiges]);
+  }, [factures, search, retardFilter, sortField, sortAsc, showLitiges]);
 
   const perteFacture = async (f: Facture, perte: boolean, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -261,18 +258,18 @@ export default function Creances() {
         <Button
           variant={showLitiges ? 'default' : 'outline'}
           size="sm"
-          onClick={() => { setShowLitiges(!showLitiges); if (!showLitiges) setShowPertes(false); }}
+          onClick={() => setShowLitiges(!showLitiges)}
         >
           <Scale className="h-4 w-4 mr-1" />
           {showLitiges ? 'Voir actifs' : 'Litiges'}
         </Button>
         <Button
-          variant={showPertes ? 'default' : 'outline'}
+          variant="outline"
           size="sm"
-          onClick={() => { setShowPertes(!showPertes); if (!showPertes) setShowLitiges(false); }}
+          onClick={() => navigate('/pertes')}
         >
           <XOctagon className="h-4 w-4 mr-1" />
-          {showPertes ? 'Voir actifs' : 'Pertes'}
+          Pertes
         </Button>
       </div>
 
@@ -349,10 +346,6 @@ export default function Creances() {
                       <div className="flex items-center justify-center gap-1">
                         {f.statut === 'litige' ? (
                           <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={(e) => removeLitige(f, e)} title="Retirer le litige">
-                            <RotateCcw className="h-3.5 w-3.5" />
-                          </Button>
-                        ) : showPertes ? (
-                          <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={(e) => perteFacture(f, false, e)}>
                             <RotateCcw className="h-3.5 w-3.5" />
                           </Button>
                         ) : (
