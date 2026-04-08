@@ -100,7 +100,7 @@ export default function Creances() {
     load();
   }, [country]);
 
-  const filtered = useMemo(() => {
+  const { filtered, totalAlgebrique } = useMemo(() => {
     let res = factures;
     // Filter by statut view mode
     if (showLitiges) {
@@ -108,7 +108,6 @@ export default function Creances() {
     } else {
       res = res.filter(f => f.statut === 'en_cours' || f.statut === 'retention_dgd');
     }
-    // Show all document types (FACT, REC, NCRE, NDEB)
     if (search) {
       const s = search.toLowerCase();
       res = res.filter(f => f.clients?.nom.toLowerCase().includes(s) || f.numero_facture.toLowerCase().includes(s));
@@ -123,6 +122,10 @@ export default function Creances() {
         return true;
       });
     }
+    // Total algébrique incluant les montants négatifs
+    const totalAlgebrique = res.reduce((s, f) => s + (f.solde_restant ?? f.montant), 0);
+    // Exclure les lignes négatives de l'affichage (pas de relance sur montants négatifs)
+    res = res.filter(f => (f.solde_restant ?? f.montant) > 0);
     res = [...res].sort((a, b) => {
       let cmp = 0;
       if (sortField === 'retard') cmp = joursRetard(b.date_echeance) - joursRetard(a.date_echeance);
@@ -130,7 +133,7 @@ export default function Creances() {
       else cmp = (a.clients?.nom || '').localeCompare(b.clients?.nom || '');
       return sortAsc ? -cmp : cmp;
     });
-    return res;
+    return { filtered: res, totalAlgebrique };
   }, [factures, search, retardFilter, sortField, sortAsc, showLitiges]);
 
   const perteFacture = async (f: Facture, perte: boolean, e: React.MouseEvent) => {
@@ -369,7 +372,7 @@ export default function Creances() {
                 <tr className="border-t-2 bg-muted/30 font-semibold">
                   <td className="p-3">{filtered.length} documents</td>
                   <td className="p-3"></td>
-                  <td className="p-3 text-right">{formatCurrency(filtered.reduce((s, f) => s + (f.solde_restant ?? f.montant), 0))}</td>
+                  <td className="p-3 text-right">{formatCurrency(totalAlgebrique)}</td>
                   <td className="p-3" colSpan={5}></td>
                 </tr>
               </tfoot>
