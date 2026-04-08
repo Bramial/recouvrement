@@ -89,9 +89,10 @@ export default function Creances() {
     const load = async () => {
       const maxMois = await getMaxMoisExtraction();
       const joinType = country !== 'all' ? 'clients!inner' : 'clients';
-      let query = supabase.from('factures').select(`*, ${joinType}(nom, code_client, exclusion_relance, client_interne)`)
+      let query = supabase.from('factures').select(`*, clients!inner(nom, code_client, exclusion_relance, client_interne)`)
         .in('statut', ['en_cours', 'litige', 'retention_dgd'])
-        .in('type_document', ['FACT', 'NDEB']);
+        .in('type_document', ['FACT', 'NDEB'])
+        .eq('clients.client_interne', false);
       if (maxMois) query = query.eq('mois_extraction', maxMois);
       if (country !== 'all') query = query.ilike('clients.code_client', `${country}_%`);
       query = query.order('date_echeance', { ascending: true });
