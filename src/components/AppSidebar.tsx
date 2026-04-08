@@ -1,4 +1,4 @@
-import { FileText, Users, Clock, BarChart3, LogOut } from 'lucide-react';
+import { FileText, Users, Clock, BarChart3, LogOut, CheckCircle } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/hooks/useAuth';
 import {
@@ -18,6 +18,7 @@ const navItems = [
   { title: 'Rapport du jour', url: '/', icon: FileText },
   { title: 'Créances', url: '/creances', icon: BarChart3 },
   { title: 'Clients', url: '/clients', icon: Users },
+  { title: 'Factures réglées', url: '/factures-reglees', icon: CheckCircle },
   { title: 'Historique', url: '/historique', icon: Clock },
 ];
 

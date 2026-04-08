@@ -9,28 +9,18 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { ArrowLeft, Save, Archive, RotateCcw, ChevronDown, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Save, Archive, RotateCcw, ChevronDown, ChevronRight, Undo2, Scale, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog';
 
 interface Client {
   id: string; code_client: string; nom: string; email: string | null;
   telephone: string | null; pays: string | null; conditions_paiement: string | null;
-  exclusion_relance: boolean; archive: boolean;
+  exclusion_relance: boolean;
 }
 interface Facture {
   id: string; numero_facture: string; montant: number; solde_restant: number | null;
   date_echeance: string; date_emission: string; statut: string; type_document: string;
+  notes_litige: string | null; date_reception_dgd: string | null;
 }
 interface Action {
   id: string; type_action: string; date_prevue: string; date_executee: string | null;
@@ -38,19 +28,23 @@ interface Action {
   factures: { numero_facture: string } | null;
 }
 
-const TYPE_ACTION_LABELS: Record<string, string> = {
-  email_j7: 'Email J+7', appel_j15: 'Appel J+15', mise_en_demeure_j30: 'Mise en demeure',
+const TYPE_ACTION_META: Record<string, { label: string; icon: string }> = {
+  email_j7: { label: 'Email J+7', icon: '📧' },
+  appel_j15: { label: 'Appel J+15', icon: '📞' },
+  mise_en_demeure_j30: { label: 'Mise en demeure', icon: '📄' },
+  rappel_dgd: { label: 'Rappel DGD', icon: '🛡️' },
 };
-const STATUT_LABELS: Record<string, string> = {
-  a_faire: 'À faire', fait: 'Fait', ignore: 'Ignoré', reporte: 'Reporté',
+const STATUT_META: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' | 'destructive' }> = {
+  a_faire: { label: 'À faire', variant: 'secondary' },
+  fait: { label: 'Fait', variant: 'default' },
+  ignore: { label: 'Ignoré', variant: 'outline' },
+  reporte: { label: 'Reporté', variant: 'secondary' },
 };
 
 export default function ClientDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [client, setClient] = useState<Client | null>(null);
-  const [invoices, setInvoices] = useState<Facture[]>([]);
-  const [movements, setMovements] = useState<Facture[]>([]);
   const [actions, setActions] = useState<Action[]>([]);
   const [email, setEmail] = useState('');
   const [telephone, setTelephone] = useState('');
@@ -58,12 +52,21 @@ export default function ClientDetail() {
   const [exclusion, setExclusion] = useState(false);
   const [saving, setSaving] = useState(false);
   const [movementsOpen, setMovementsOpen] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [allFactures, setAllFactures] = useState<Facture[]>([]);
+  const [litigeModal, setLitigeModal] = useState<Facture | null>(null);
+  const [litigeNote, setLitigeNote] = useState('');
+  const [litigeDetailModal, setLitigeDetailModal] = useState<Facture | null>(null);
+  const [newLitigeNote, setNewLitigeNote] = useState('');
+  const [savingLitigeNote, setSavingLitigeNote] = useState(false);
+  const [dgdModal, setDgdModal] = useState<Facture | null>(null);
+  const [dgdDate, setDgdDate] = useState('');
 
   useEffect(() => {
     if (!id) return;
     const load = async () => {
       const maxMois = await getMaxMoisExtraction();
-      let facturesQuery = supabase.from('factures').select('*').eq('client_id', id).eq('statut', 'en_cours');
+      let facturesQuery = supabase.from('factures').select('*').eq('client_id', id).in('statut', ['en_cours', 'archivee', 'litige', 'retention_dgd']);
       if (maxMois) facturesQuery = facturesQuery.eq('mois_extraction', maxMois);
 
       const [cRes, fRes, aRes] = await Promise.all([
@@ -74,20 +77,92 @@ export default function ClientDetail() {
 
       const c = cRes.data as unknown as Client;
       if (c) {
-        setClient({ ...c, archive: c.archive ?? false });
+        setClient(c);
         setEmail(c.email || '');
         setTelephone(c.telephone || '');
         setConditions(c.conditions_paiement || '');
         setExclusion(c.exclusion_relance);
       }
 
-      const allFactures = (fRes.data || []) as unknown as Facture[];
-      setInvoices(allFactures.filter(f => f.type_document === 'FACT' && (f.solde_restant ?? f.montant) > 0));
-      setMovements(allFactures.filter(f => f.type_document !== 'FACT'));
+      const loadedFactures = (fRes.data || []) as unknown as Facture[];
+      setAllFactures(loadedFactures);
       setActions((aRes.data || []) as unknown as Action[]);
     };
     load();
   }, [id]);
+
+  const activeFactures = allFactures.filter(f => showArchived ? f.statut === 'archivee' : (f.statut === 'en_cours' || f.statut === 'litige' || f.statut === 'retention_dgd'));
+  const invoices = activeFactures.filter(f => f.type_document === 'FACT' && (f.solde_restant ?? f.montant) > 0);
+  const movements = activeFactures.filter(f => f.type_document !== 'FACT');
+  const archivedCount = allFactures.filter(f => f.statut === 'archivee').length;
+
+  const archiveFacture = async (facture: Facture, archive: boolean) => {
+    const newStatut = archive ? 'archivee' : 'en_cours';
+    await supabase.from('factures').update({ statut: newStatut }).eq('id', facture.id);
+    setAllFactures(prev => prev.map(f => f.id === facture.id ? { ...f, statut: newStatut } : f));
+    toast.success(archive ? `Facture ${facture.numero_facture} archivée` : `Facture ${facture.numero_facture} restaurée`);
+  };
+
+  const handleLitige = async () => {
+    if (!litigeModal || !litigeNote.trim()) return;
+    await supabase.from('factures').update({ statut: 'litige', notes_litige: litigeNote.trim() }).eq('id', litigeModal.id);
+    setAllFactures(prev => prev.map(f => f.id === litigeModal.id ? { ...f, statut: 'litige', notes_litige: litigeNote.trim() } : f));
+    toast.success(`Facture ${litigeModal.numero_facture} marquée en litige`);
+    setLitigeModal(null);
+    setLitigeNote('');
+  };
+
+  const addLitigeNote = async () => {
+    if (!litigeDetailModal || !newLitigeNote.trim()) return;
+    setSavingLitigeNote(true);
+    const today = new Date().toLocaleDateString('fr-FR');
+    const existing = litigeDetailModal.notes_litige || '';
+    const updated = existing ? `${existing}\n[${today}] ${newLitigeNote.trim()}` : `[${today}] ${newLitigeNote.trim()}`;
+    await supabase.from('factures').update({ notes_litige: updated }).eq('id', litigeDetailModal.id);
+    setAllFactures(prev => prev.map(f => f.id === litigeDetailModal.id ? { ...f, notes_litige: updated } : f));
+    setLitigeDetailModal(prev => prev ? { ...prev, notes_litige: updated } : null);
+    setNewLitigeNote('');
+    setSavingLitigeNote(false);
+    toast.success('Note ajoutée');
+  };
+
+  const removeLitige = async (facture: Facture) => {
+    if (!confirm('Retirer le litige et remettre la facture en cours ?')) return;
+    await supabase.from('factures').update({ statut: 'en_cours', notes_litige: null }).eq('id', facture.id);
+    setAllFactures(prev => prev.map(f => f.id === facture.id ? { ...f, statut: 'en_cours', notes_litige: null } : f));
+    toast.success(`Litige retiré pour ${facture.numero_facture}`);
+  };
+
+  const handleDgd = async () => {
+    if (!dgdModal || !dgdDate || !client) return;
+    const rappelDate = new Date(dgdDate);
+    rappelDate.setFullYear(rappelDate.getFullYear() + 1);
+    const rappelStr = rappelDate.toISOString().split('T')[0];
+
+    await supabase.from('factures').update({ statut: 'retention_dgd', date_reception_dgd: dgdDate }).eq('id', dgdModal.id);
+    await supabase.from('actions_relance').insert({
+      facture_id: dgdModal.id,
+      client_id: client.id,
+      type_action: 'rappel_dgd',
+      date_prevue: rappelStr,
+      statut: 'a_faire',
+      notes: `Réception travaux: ${dgdDate} — Rappel DGD prévu le ${rappelStr}`,
+    });
+
+    setAllFactures(prev => prev.map(f => f.id === dgdModal.id ? { ...f, statut: 'retention_dgd', date_reception_dgd: dgdDate } : f));
+    const { data } = await supabase.from('actions_relance').select('*, factures(numero_facture)').eq('client_id', id).order('date_prevue', { ascending: false });
+    setActions((data || []) as unknown as Action[]);
+    toast.success(`Rétention DGD activée — rappel prévu le ${rappelStr}`);
+    setDgdModal(null);
+    setDgdDate('');
+  };
+
+  const removeDgd = async (facture: Facture) => {
+    if (!confirm('Retirer la rétention DGD et remettre la facture en cours ?')) return;
+    await supabase.from('factures').update({ statut: 'en_cours', date_reception_dgd: null }).eq('id', facture.id);
+    setAllFactures(prev => prev.map(f => f.id === facture.id ? { ...f, statut: 'en_cours', date_reception_dgd: null } : f));
+    toast.success(`Rétention DGD retirée pour ${facture.numero_facture}`);
+  };
 
   const handleSave = async () => {
     if (!id) return;
@@ -100,12 +175,12 @@ export default function ClientDetail() {
     setSaving(false);
   };
 
-  const handleArchiveToggle = async () => {
-    if (!id || !client) return;
-    const newVal = !client.archive;
-    await supabase.from('clients').update({ archive: newVal }).eq('id', id);
-    setClient({ ...client, archive: newVal });
-    toast.success(newVal ? 'Client archivé' : 'Client restauré');
+  const reopenAction = async (actionId: string) => {
+    if (!confirm('Remettre cette action en attente ?')) return;
+    await supabase.from('actions_relance').update({ statut: 'a_faire', date_executee: null }).eq('id', actionId);
+    toast.success('Action remise en attente');
+    const { data } = await supabase.from('actions_relance').select('*, factures(numero_facture)').eq('client_id', id).order('date_prevue', { ascending: false });
+    setActions((data || []) as unknown as Action[]);
   };
 
   const formatCurrency = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: 0 }).format(n);
@@ -119,9 +194,10 @@ export default function ClientDetail() {
       </Button>
       <div className="flex items-center gap-3">
         <h1 className="text-2xl font-bold">{client.nom}</h1>
-        {client.archive && <Badge variant="outline" className="text-xs">Archivé</Badge>}
       </div>
-      <p className="text-sm text-muted-foreground">{client.code_client} • {client.pays}</p>
+      <p className="text-sm text-muted-foreground">
+        {client.code_client.startsWith('FR_') ? '🇫🇷' : client.code_client.startsWith('PT_') ? '🇵🇹' : ''} {client.code_client}
+      </p>
 
       <Card>
         <CardHeader><CardTitle className="text-base">Informations</CardTitle></CardHeader>
@@ -144,36 +220,22 @@ export default function ClientDetail() {
               <Label>Exclure des relances</Label>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <Button onClick={handleSave} disabled={saving}><Save className="h-4 w-4 mr-1" /> Enregistrer</Button>
-
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant={client.archive ? 'outline' : 'destructive'} size="sm">
-                  {client.archive ? <><RotateCcw className="h-4 w-4 mr-1" /> Restaurer</> : <><Archive className="h-4 w-4 mr-1" /> Archiver</>}
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>{client.archive ? 'Restaurer ce client ?' : 'Archiver ce client ?'}</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    {client.archive
-                      ? 'Le client réapparaîtra dans les listes principales.'
-                      : "Il n'apparaîtra plus dans les listes principales mais restera accessible dans la section Archives."}
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Annuler</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleArchiveToggle}>Confirmer</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </div>
+          <Button onClick={handleSave} disabled={saving}><Save className="h-4 w-4 mr-1" /> Enregistrer</Button>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Factures en cours ({invoices.length})</CardTitle></CardHeader>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">{showArchived ? 'Factures archivées' : 'Factures en cours'} ({invoices.length})</CardTitle>
+            <div className="flex items-center gap-2">
+              <Switch checked={showArchived} onCheckedChange={setShowArchived} id="show-archived" />
+              <Label htmlFor="show-archived" className="text-xs text-muted-foreground whitespace-nowrap">
+                Archivées{archivedCount > 0 && ` (${archivedCount})`}
+              </Label>
+            </div>
+          </div>
+        </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="border-b bg-muted/50">
@@ -181,19 +243,62 @@ export default function ClientDetail() {
               <th className="text-right p-3">Montant</th>
               <th className="text-right p-3">Reste dû</th>
               <th className="text-left p-3">Échéance</th>
+              <th className="text-center p-3"></th>
             </tr></thead>
             <tbody>
               {invoices.map(f => (
                 <tr key={f.id} className="border-b">
-                  <td className="p-3">{f.numero_facture}</td>
+                  <td className="p-3">
+                    {f.numero_facture}
+                    {f.statut === 'litige' && (
+                      <Badge
+                        className="ml-2 bg-badge-danger text-badge-danger-foreground cursor-pointer hover:opacity-80"
+                        onClick={() => { setLitigeDetailModal(f); setNewLitigeNote(''); }}
+                      >Litige</Badge>
+                    )}
+                    {f.statut === 'retention_dgd' && (
+                      <Badge className="ml-2 bg-badge-info text-badge-info-foreground" title={f.date_reception_dgd ? `Rappel le ${new Date(new Date(f.date_reception_dgd).setFullYear(new Date(f.date_reception_dgd).getFullYear() + 1)).toLocaleDateString('fr-FR')}` : ''}>
+                        DGD {f.date_reception_dgd && `→ ${new Date(new Date(f.date_reception_dgd).setFullYear(new Date(f.date_reception_dgd).getFullYear() + 1)).toLocaleDateString('fr-FR')}`}
+                      </Badge>
+                    )}
+                  </td>
                   <td className="p-3 text-right text-muted-foreground">{formatCurrency(f.montant)}</td>
                   <td className="p-3 text-right font-medium">{formatCurrency(f.solde_restant ?? f.montant)}</td>
                   <td className="p-3">{f.date_echeance}</td>
+                  <td className="p-3 text-center">
+                    <div className="flex items-center justify-center gap-1">
+                    {f.statut === 'retention_dgd' ? (
+                      <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => removeDgd(f)} title="Retirer la rétention DGD">
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      </Button>
+                    ) : f.statut === 'litige' ? (
+                      <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => removeLitige(f)} title="Retirer le litige">
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      </Button>
+                    ) : showArchived ? (
+                      <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => archiveFacture(f, false)}>
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      </Button>
+                    ) : (
+                      <>
+                        <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => { setDgdModal(f); setDgdDate(''); }} title="Rétention DGD">
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => { setLitigeModal(f); setLitigeNote(''); }} title="Marquer en litige">
+                          <Scale className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => archiveFacture(f, true)}>
+                          <Archive className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {invoices.length === 0 && <p className="text-center text-muted-foreground py-4">Aucune facture en cours.</p>}
+          {invoices.length === 0 && <p className="text-center text-muted-foreground py-4">{showArchived ? 'Aucune facture archivée.' : 'Aucune facture en cours.'}</p>}
         </CardContent>
       </Card>
 
@@ -235,21 +340,127 @@ export default function ClientDetail() {
       )}
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Historique des relances</CardTitle></CardHeader>
-        <CardContent className="space-y-3">
-          {actions.length === 0 && <p className="text-sm text-muted-foreground">Aucune relance.</p>}
-          {actions.map(a => (
-            <div key={a.id} className="border rounded-md p-3 text-sm space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="font-medium">{TYPE_ACTION_LABELS[a.type_action] || a.type_action} — {a.factures?.numero_facture}</span>
-                <Badge variant={a.statut === 'fait' ? 'default' : 'secondary'}>{STATUT_LABELS[a.statut] || a.statut}</Badge>
+        <CardHeader><CardTitle className="text-base">Historique des relances ({actions.length})</CardTitle></CardHeader>
+        <CardContent>
+          {actions.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Aucune relance.</p>
+          ) : (
+            <div className="relative ml-4">
+              <div className="absolute left-3 top-0 bottom-0 w-px bg-border" />
+              <div className="space-y-6">
+                {actions.map(a => {
+                  const meta = TYPE_ACTION_META[a.type_action] || { label: a.type_action, icon: '📋' };
+                  const statut = STATUT_META[a.statut] || { label: a.statut, variant: 'secondary' as const };
+                  const displayDate = a.date_executee || a.date_prevue;
+                  return (
+                    <div key={a.id} className="relative pl-8">
+                      <span className="absolute left-0 top-0 flex items-center justify-center w-6 h-6 rounded-full bg-card border text-sm">
+                        {meta.icon}
+                      </span>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs text-muted-foreground">{displayDate}</span>
+                          <span className="font-medium text-sm">{meta.label}</span>
+                          <Badge variant={statut.variant}>{statut.label}</Badge>
+                          {a.statut === 'fait' && (
+                            <Button size="sm" variant="ghost" className="h-6 px-2 text-xs gap-1" onClick={() => reopenAction(a.id)}>
+                              <Undo2 className="h-3 w-3" /> Réouvrir
+                            </Button>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Facture #{a.factures?.numero_facture}
+                          {a.date_executee && a.date_prevue !== a.date_executee && ` · Prévue le ${a.date_prevue}`}
+                        </p>
+                        {a.notes && (
+                          <p className="text-sm whitespace-pre-line bg-muted/50 rounded-md px-3 py-2 mt-1">{a.notes}</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-              <p className="text-muted-foreground">Prévue: {a.date_prevue} {a.date_executee && `| Exécutée: ${a.date_executee}`}</p>
-              {a.notes && <p className="text-xs whitespace-pre-line">{a.notes}</p>}
             </div>
-          ))}
+          )}
         </CardContent>
       </Card>
+
+      {dgdModal && (
+        <div className="fixed inset-0 bg-foreground/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-card rounded-lg p-6 w-full max-w-md space-y-4">
+            <h3 className="font-semibold">Rétention DGD</h3>
+            <p className="text-sm text-muted-foreground">
+              Facture <span className="font-medium text-foreground">{dgdModal.numero_facture}</span> — {formatCurrency(dgdModal.solde_restant ?? dgdModal.montant)}
+            </p>
+            <div className="space-y-2">
+              <Label>Date de réception des travaux</Label>
+              <Input type="date" value={dgdDate} onChange={(e) => setDgdDate(e.target.value)} />
+            </div>
+            {dgdDate && (
+              <p className="text-sm text-muted-foreground">
+                Rappel DGD prévu le <span className="font-medium text-foreground">{new Date(new Date(dgdDate).setFullYear(new Date(dgdDate).getFullYear() + 1)).toLocaleDateString('fr-FR')}</span> (réception + 365j)
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDgdModal(null)}>Annuler</Button>
+              <Button onClick={handleDgd} disabled={!dgdDate}>Confirmer</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {litigeDetailModal && (
+        <div className="fixed inset-0 bg-foreground/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-card rounded-lg p-6 w-full max-w-md space-y-4">
+            <h3 className="font-semibold">Litige — Facture {litigeDetailModal.numero_facture}</h3>
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Notes du litige</p>
+              {litigeDetailModal.notes_litige ? (
+                <div className="bg-muted/50 rounded-md px-3 py-2 text-sm whitespace-pre-line max-h-48 overflow-y-auto">
+                  {litigeDetailModal.notes_litige}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground italic">Aucune note.</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Ajouter une note</p>
+              <textarea
+                className="w-full border rounded-md p-3 text-sm min-h-[60px] bg-background"
+                placeholder="Nouvelle note..."
+                value={newLitigeNote}
+                onChange={(e) => setNewLitigeNote(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setLitigeDetailModal(null)}>Fermer</Button>
+              <Button onClick={addLitigeNote} disabled={!newLitigeNote.trim() || savingLitigeNote}>Ajouter</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {litigeModal && (
+        <div className="fixed inset-0 bg-foreground/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-card rounded-lg p-6 w-full max-w-md space-y-4">
+            <h3 className="font-semibold">Marquer en litige</h3>
+            <p className="text-sm text-muted-foreground">
+              Facture <span className="font-medium text-foreground">{litigeModal.numero_facture}</span>
+            </p>
+            <textarea
+              className="w-full border rounded-md p-3 text-sm min-h-[80px] bg-background"
+              placeholder="Décrivez le motif du litige..."
+              value={litigeNote}
+              onChange={(e) => setLitigeNote(e.target.value)}
+              autoFocus
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setLitigeModal(null)}>Annuler</Button>
+              <Button variant="destructive" onClick={handleLitige} disabled={!litigeNote.trim()}>Confirmer le litige</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

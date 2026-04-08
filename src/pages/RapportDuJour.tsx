@@ -9,10 +9,12 @@ import { NoteModal } from '@/components/NoteModal';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Euro, AlertTriangle, ListChecks, CheckCircle, Mail, Phone, Calendar, X, MessageSquare } from 'lucide-react';
+import { Euro, AlertTriangle, ListChecks, CheckCircle, Mail, Phone, Calendar, X, MessageSquare, FileText, Receipt, Globe } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { toast } from 'sonner';
+import { useCountryFilter } from '@/hooks/useCountryFilter';
+import { CountryFilter } from '@/components/CountryFilter';
 
 interface Action {
   id: string;
@@ -23,8 +25,8 @@ interface Action {
   statut: string;
   contenu_email: string | null;
   notes: string | null;
-  factures: { numero_facture: string; montant: number; date_echeance: string; solde_restant: number | null } | null;
-  clients: { nom: string; email: string | null; telephone: string | null; code_client: string; archive: boolean | null } | null;
+  factures: { numero_facture: string; montant: number; date_echeance: string; solde_restant: number | null; statut: string } | null;
+  clients: { nom: string; email: string | null; telephone: string | null; code_client: string } | null;
 }
 
 interface Rapport {
@@ -36,16 +38,35 @@ interface Rapport {
   factures_payees_depuis_dernier: string | null;
 }
 
+interface FactureResume {
+  numero_facture: string;
+  montant: number;
+  solde_restant: number | null;
+  source: string | null;
+  client_nom: string;
+}
+
+interface KpiExtras {
+  totalCreances: number;
+  totalCreancesPrev: number;
+  totalFR: number;
+  totalPT: number;
+  facturesReglees: FactureResume[];
+  nouvellesFactures: FactureResume[];
+}
+
 const TYPE_ACTION_ORDER: Record<string, number> = {
   mise_en_demeure_j30: 0,
   appel_j15: 1,
   email_j7: 2,
+  rappel_dgd: 3,
 };
 
 const TYPE_ACTION_LABELS: Record<string, { label: string; className: string }> = {
   mise_en_demeure_j30: { label: 'Mise en demeure', className: 'bg-badge-danger text-badge-danger-foreground' },
   appel_j15: { label: 'Appel J+15', className: 'bg-badge-warning text-badge-warning-foreground' },
   email_j7: { label: 'Email J+7', className: 'bg-badge-info text-badge-info-foreground' },
+  rappel_dgd: { label: 'Rappel DGD', className: 'bg-badge-info text-badge-info-foreground' },
 };
 
 function formatCurrency(n: number | null | undefined) {
@@ -64,6 +85,7 @@ function joursRetard(dateEcheance: string) {
 export default function RapportDuJour() {
   const [rapport, setRapport] = useState<Rapport | null>(null);
   const [actions, setActions] = useState<Action[]>([]);
+  const [kpiExtras, setKpiExtras] = useState<KpiExtras | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [emailModal, setEmailModal] = useState<Action | null>(null);
@@ -72,25 +94,116 @@ export default function RapportDuJour() {
   const [noteModal, setNoteModal] = useState<Action | null>(null);
   const [ignoreModal, setIgnoreModal] = useState<Action | null>(null);
   const [ignoreNote, setIgnoreNote] = useState('');
+  const [showRegleesModal, setShowRegleesModal] = useState(false);
+  const [showNouvellesModal, setShowNouvellesModal] = useState(false);
+  const { country } = useCountryFilter();
 
   const today = format(new Date(), 'yyyy-MM-dd');
 
   const fetchData = async () => {
     setLoading(true);
+    const clientsJoin = country !== 'all' ? 'clients!inner' : 'clients';
+    let actionsQuery = supabase.from('actions_relance')
+      .select(`*, factures(numero_facture, montant, date_echeance, solde_restant, statut), ${clientsJoin}(nom, email, telephone, code_client)`)
+      .eq('statut', 'a_faire').lte('date_prevue', today);
+    if (country !== 'all') actionsQuery = actionsQuery.ilike('clients.code_client', `${country}_%`);
+
+    // Get current and previous mois_extraction
+    const maxMois = await getMaxMoisExtraction();
+
     const [rapportRes, actionsRes] = await Promise.all([
-      supabase.from('rapports_quotidiens').select('*').eq('date_rapport', today).maybeSingle(),
-      supabase.from('actions_relance').select('*, factures(numero_facture, montant, date_echeance, solde_restant), clients(nom, email, telephone, code_client, archive)').eq('statut', 'a_faire').lte('date_prevue', today),
+      supabase.from('rapports_quotidiens').select('*').order('date_rapport', { ascending: false }).limit(1).maybeSingle(),
+      actionsQuery,
     ]);
     setRapport(rapportRes.data as Rapport | null);
-    // Filter out archived clients
+    // Filter out actions linked to archived invoices
     const allActions = ((actionsRes.data || []) as unknown as Action[])
-      .filter(a => !a.clients?.archive)
+      .filter(a => a.factures?.statut !== 'archivee' && a.factures?.statut !== 'litige')
       .sort((a, b) => (TYPE_ACTION_ORDER[a.type_action] ?? 9) - (TYPE_ACTION_ORDER[b.type_action] ?? 9));
     setActions(allActions);
+
+    // Fetch extra KPIs from factures
+    if (maxMois) {
+      // Compute previous month from mois_extraction (format "YYYY-MM")
+      const [y, m] = maxMois.split('-').map(Number);
+      const prevDate = new Date(y, m - 2, 1); // m-1 is current (0-indexed), m-2 is previous
+      const prevMois = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+
+      // Current month: factures en_cours for total créances + répartition FR/PT
+      let currentQuery = supabase.from('factures')
+        .select('solde_restant, source, client_id, clients(code_client)')
+        .eq('mois_extraction', maxMois)
+        .in('statut', ['en_cours', 'retention_dgd']);
+      if (country !== 'all') currentQuery = currentQuery.eq('source', country);
+
+      // Previous month: total créances for comparison
+      let prevQuery = supabase.from('factures')
+        .select('solde_restant')
+        .eq('mois_extraction', prevMois)
+        .in('statut', ['en_cours', 'retention_dgd']);
+      if (country !== 'all') prevQuery = prevQuery.eq('source', country);
+
+      // Factures réglées: payee in previous extraction (detected paid between prev and current)
+      let regleesQuery = supabase.from('factures')
+        .select('numero_facture, montant, solde_restant, source, clients(nom)')
+        .eq('mois_extraction', prevMois)
+        .eq('statut', 'payee');
+      if (country !== 'all') regleesQuery = regleesQuery.eq('source', country);
+
+      // All factures in current month (to find nouvelles by comparing with prev)
+      let currentAllQuery = supabase.from('factures')
+        .select('numero_facture, montant, solde_restant, source, clients(nom)')
+        .eq('mois_extraction', maxMois);
+      if (country !== 'all') currentAllQuery = currentAllQuery.eq('source', country);
+
+      let prevNumQuery = supabase.from('factures')
+        .select('numero_facture')
+        .eq('mois_extraction', prevMois);
+      if (country !== 'all') prevNumQuery = prevNumQuery.eq('source', country);
+
+      const [currentRes, prevRes, regleesRes, currentAllRes, prevNumRes] = await Promise.all([
+        currentQuery, prevQuery, regleesQuery, currentAllQuery, prevNumQuery,
+      ]);
+
+      const currentData = (currentRes.data || []) as { solde_restant: number | null; source: string | null }[];
+      const prevData = (prevRes.data || []) as { solde_restant: number | null }[];
+
+      type FactureRow = { numero_facture: string; montant: number; solde_restant: number | null; source: string | null; clients: { nom: string } | null };
+      const toResume = (f: FactureRow): FactureResume => ({
+        numero_facture: f.numero_facture,
+        montant: f.montant,
+        solde_restant: f.solde_restant,
+        source: f.source,
+        client_nom: f.clients?.nom || '—',
+      });
+
+      const facturesReglees = ((regleesRes.data || []) as FactureRow[]).map(toResume);
+
+      // Compute nouvelles factures by comparing numero_facture sets
+      const prevNumeros = new Set((prevNumRes.data || []).map((f: { numero_facture: string }) => f.numero_facture));
+      const nouvellesFactures = ((currentAllRes.data || []) as FactureRow[])
+        .filter(f => !prevNumeros.has(f.numero_facture))
+        .map(toResume);
+
+      const totalCreances = currentData.reduce((sum, f) => sum + (f.solde_restant || 0), 0);
+      const totalCreancesPrev = prevData.reduce((sum, f) => sum + (f.solde_restant || 0), 0);
+      const totalFR = currentData.filter(f => f.source === 'FR').reduce((sum, f) => sum + (f.solde_restant || 0), 0);
+      const totalPT = currentData.filter(f => f.source === 'PT').reduce((sum, f) => sum + (f.solde_restant || 0), 0);
+
+      setKpiExtras({
+        totalCreances,
+        totalCreancesPrev,
+        totalFR,
+        totalPT,
+        facturesReglees,
+        nouvellesFactures,
+      });
+    }
+
     setLoading(false);
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [country]);
 
   const handleIgnore = async () => {
     if (!ignoreModal || !ignoreNote.trim()) return;
@@ -114,8 +227,13 @@ export default function RapportDuJour() {
 
   return (
     <div className="space-y-6 max-w-6xl">
-      <h1 className="text-2xl font-bold">Rapport du jour</h1>
-      <p className="text-sm text-muted-foreground">{format(new Date(), 'EEEE d MMMM yyyy', { locale: fr })}</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Rapport du jour</h1>
+          <p className="text-sm text-muted-foreground">{format(new Date(), 'EEEE d MMMM yyyy', { locale: fr })}</p>
+        </div>
+        <CountryFilter />
+      </div>
 
       {rapport?.resume_ia && (
         <div className="rounded-lg border border-ia-border bg-ia-bg p-5">
@@ -124,10 +242,45 @@ export default function RapportDuJour() {
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard title="Total créances" value={formatCurrency(rapport?.total_creances)} icon={Euro} />
+        <KPICard
+          title="Total créances"
+          value={kpiExtras ? formatCurrency(kpiExtras.totalCreances) : formatCurrency(rapport?.total_creances)}
+          icon={Euro}
+          trend={kpiExtras && kpiExtras.totalCreancesPrev > 0 ? (() => {
+            const diff = kpiExtras.totalCreances - kpiExtras.totalCreancesPrev;
+            const pct = Math.round(Math.abs(diff) / kpiExtras.totalCreancesPrev * 100);
+            if (pct === 0) return null;
+            return {
+              direction: diff > 0 ? 'up' as const : 'down' as const,
+              label: `${diff > 0 ? '+' : '-'}${pct}% vs mois préc.`,
+              positive: diff <= 0, // baisse = positif pour les créances
+            };
+          })() : null}
+        />
         <KPICard title="Total en retard" value={formatCurrency(rapport?.total_en_retard)} subtitle={`${pctRetard}% du total`} icon={AlertTriangle} variant="danger" />
         <KPICard title="Actions du jour" value={String(actions.length)} icon={ListChecks} />
-        <KPICard title="Factures réglées" value={rapport?.factures_payees_depuis_dernier || '0'} icon={CheckCircle} variant="success" />
+        <KPICard
+          title="Factures réglées"
+          value={String(kpiExtras?.facturesReglees.length ?? 0)}
+          icon={CheckCircle}
+          variant="success"
+          onClick={() => setShowRegleesModal(true)}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {country === 'all' && (
+          <>
+            <KPICard title="Créances France" value={formatCurrency(kpiExtras?.totalFR ?? 0)} icon={Globe} />
+            <KPICard title="Créances Portugal" value={formatCurrency(kpiExtras?.totalPT ?? 0)} icon={Globe} />
+          </>
+        )}
+        <KPICard
+          title="Nouvelles factures"
+          value={String(kpiExtras?.nouvellesFactures.length ?? 0)}
+          icon={FileText}
+          onClick={() => setShowNouvellesModal(true)}
+        />
       </div>
 
       <Card>
@@ -211,6 +364,54 @@ export default function RapportDuJour() {
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setIgnoreModal(null)}>Annuler</Button>
               <Button onClick={handleIgnore} disabled={!ignoreNote.trim()}>Confirmer</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRegleesModal && kpiExtras && (
+        <div className="fixed inset-0 bg-foreground/50 flex items-center justify-center z-50 p-4" onClick={() => setShowRegleesModal(false)}>
+          <div className="bg-card rounded-lg p-6 w-full max-w-lg max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold">Factures réglées ({kpiExtras.facturesReglees.length})</h3>
+              <Button size="sm" variant="ghost" onClick={() => setShowRegleesModal(false)}><X className="h-4 w-4" /></Button>
+            </div>
+            <div className="overflow-y-auto space-y-2">
+              {kpiExtras.facturesReglees.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4">Aucune facture réglée ce mois.</p>
+              ) : kpiExtras.facturesReglees.map((f) => (
+                <div key={f.numero_facture} className="border rounded-md p-3 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{f.client_nom}</p>
+                    <p className="text-xs text-muted-foreground">#{f.numero_facture} · {f.source}</p>
+                  </div>
+                  <p className="text-sm font-semibold whitespace-nowrap">{formatCurrency(f.montant)}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showNouvellesModal && kpiExtras && (
+        <div className="fixed inset-0 bg-foreground/50 flex items-center justify-center z-50 p-4" onClick={() => setShowNouvellesModal(false)}>
+          <div className="bg-card rounded-lg p-6 w-full max-w-lg max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold">Nouvelles factures ({kpiExtras.nouvellesFactures.length})</h3>
+              <Button size="sm" variant="ghost" onClick={() => setShowNouvellesModal(false)}><X className="h-4 w-4" /></Button>
+            </div>
+            <div className="overflow-y-auto space-y-2">
+              {kpiExtras.nouvellesFactures.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4">Aucune nouvelle facture ce mois.</p>
+              ) : kpiExtras.nouvellesFactures.map((f) => (
+                <div key={f.numero_facture} className="border rounded-md p-3 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{f.client_nom}</p>
+                    <p className="text-xs text-muted-foreground">#{f.numero_facture} · {f.source}</p>
+                  </div>
+                  <p className="text-sm font-semibold whitespace-nowrap">{formatCurrency(f.solde_restant ?? f.montant)}</p>
+                </div>
+              ))}
             </div>
           </div>
         </div>

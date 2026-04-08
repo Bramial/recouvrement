@@ -5,12 +5,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { Search, Mail, Phone, AlertTriangle, Loader2, Archive, RotateCcw } from 'lucide-react';
+import { Search, Mail, Phone, AlertTriangle, Loader2, Archive, RotateCcw, ArrowUp, ArrowDown, Undo2, Scale, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
+import { useNavigate } from 'react-router-dom';
+import { useCountryFilter } from '@/hooks/useCountryFilter';
+import { CountryFilter } from '@/components/CountryFilter';
 
 interface Facture {
   id: string;
@@ -23,7 +24,8 @@ interface Facture {
   solde_restant: number | null;
   statut: string;
   source: string | null;
-  clients: { nom: string; code_client: string; archive: boolean | null } | null;
+  date_reception_dgd: string | null;
+  clients: { nom: string; code_client: string; exclusion_relance: boolean } | null;
 }
 
 interface ActionRelance {
@@ -54,7 +56,7 @@ function formatCurrency(n: number) {
 }
 
 const TYPE_ACTION_LABELS: Record<string, string> = {
-  email_j7: 'Email J+7', appel_j15: 'Appel J+15', mise_en_demeure_j30: 'Mise en demeure',
+  email_j7: 'Email J+7', appel_j15: 'Appel J+15', mise_en_demeure_j30: 'Mise en demeure', rappel_dgd: 'Rappel DGD',
 };
 const STATUT_LABELS: Record<string, string> = {
   a_faire: 'À faire', fait: 'Fait', ignore: 'Ignoré', reporte: 'Reporté',
@@ -72,36 +74,45 @@ export default function Creances() {
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [paysFilter, setPaysFilter] = useState('all');
+  const { country } = useCountryFilter();
   const [retardFilter, setRetardFilter] = useState('all');
-  const [showAllMovements, setShowAllMovements] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [sortField, setSortField] = useState<'retard' | 'montant' | 'nom'>('retard');
   const [sortAsc, setSortAsc] = useState(false);
+  const [showLitiges, setShowLitiges] = useState(false);
   const [selected, setSelected] = useState<Facture | null>(null);
   const [actionsHistory, setActionsHistory] = useState<ActionRelance[]>([]);
+  const [litigeModal, setLitigeModal] = useState<Facture | null>(null);
+  const [litigeNote, setLitigeNote] = useState('');
+  const navigate = useNavigate();
 
   useEffect(() => {
     const load = async () => {
       const maxMois = await getMaxMoisExtraction();
-      let query = supabase.from('factures').select('*, clients(nom, code_client, archive)').eq('statut', 'en_cours');
+      const joinType = country !== 'all' ? 'clients!inner' : 'clients';
+      let query = supabase.from('factures').select(`*, ${joinType}(nom, code_client, exclusion_relance)`).in('statut', ['en_cours', 'archivee', 'litige', 'retention_dgd']);
       if (maxMois) query = query.eq('mois_extraction', maxMois);
+      if (country !== 'all') query = query.ilike('clients.code_client', `${country}_%`);
+      query = query.order('date_echeance', { ascending: true });
       const { data } = await query;
       setFactures((data || []) as unknown as Facture[]);
       setLoading(false);
     };
     load();
-  }, []);
+  }, [country]);
 
   const filtered = useMemo(() => {
     let res = factures;
-    // Filter by archive status
-    res = res.filter(f => showArchived ? !!f.clients?.archive : !f.clients?.archive);
-    // By default show only FACT with solde > 0, unless toggle is on
-    if (!showAllMovements) {
-      res = res.filter(f => f.type_document === 'FACT' && (f.solde_restant ?? f.montant) > 0);
+    // Filter by statut view mode
+    if (showLitiges) {
+      res = res.filter(f => f.statut === 'litige');
+    } else if (showArchived) {
+      res = res.filter(f => f.statut === 'archivee');
+    } else {
+      res = res.filter(f => f.statut === 'en_cours' || f.statut === 'retention_dgd');
     }
-    if (paysFilter !== 'all') res = res.filter(f => f.source === paysFilter);
+    // Only show FACT with positive solde
+    res = res.filter(f => f.type_document === 'FACT' && (f.solde_restant ?? f.montant) > 0);
     if (search) {
       const s = search.toLowerCase();
       res = res.filter(f => f.clients?.nom.toLowerCase().includes(s) || f.numero_facture.toLowerCase().includes(s));
@@ -124,19 +135,14 @@ export default function Creances() {
       return sortAsc ? -cmp : cmp;
     });
     return res;
-  }, [factures, search, paysFilter, retardFilter, sortField, sortAsc, showAllMovements, showArchived]);
+  }, [factures, search, retardFilter, sortField, sortAsc, showArchived, showLitiges]);
 
-  const archiveClient = async (f: Facture, archive: boolean, e: React.MouseEvent) => {
+  const archiveFacture = async (f: Facture, archive: boolean, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!f.client_id) return;
-    await supabase.from('clients').update({ archive }).eq('id', f.client_id);
-    // Update local state
-    setFactures(prev => prev.map(fac => 
-      fac.client_id === f.client_id 
-        ? { ...fac, clients: fac.clients ? { ...fac.clients, archive } : fac.clients } 
-        : fac
-    ));
-    toast.success(archive ? `${f.clients?.nom} archivé` : `${f.clients?.nom} restauré`);
+    const newStatut = archive ? 'archivee' : 'en_cours';
+    await supabase.from('factures').update({ statut: newStatut }).eq('id', f.id);
+    setFactures(prev => prev.map(fac => fac.id === f.id ? { ...fac, statut: newStatut } : fac));
+    toast.success(archive ? `Facture ${f.numero_facture} archivée` : `Facture ${f.numero_facture} restaurée`);
   };
 
   const openDetail = async (f: Facture) => {
@@ -147,6 +153,18 @@ export default function Creances() {
 
   const generateAction = async (f: Facture, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (f.statut === 'litige') {
+      toast.warning('Cette facture est en litige.');
+      return;
+    }
+    if (f.statut === 'retention_dgd') {
+      toast.warning('Cette facture est en rétention DGD.');
+      return;
+    }
+    if (f.clients?.exclusion_relance) {
+      toast.warning('Ce client est exclu des relances.');
+      return;
+    }
     const retard = joursRetard(f.date_echeance);
     const actionDef = getActionType(retard);
     if (!actionDef) return;
@@ -190,25 +208,47 @@ export default function Creances() {
     else { setSortField(field); setSortAsc(false); }
   };
 
+  const reopenAction = async (actionId: string) => {
+    if (!confirm('Remettre cette action en attente ?')) return;
+    await supabase.from('actions_relance').update({ statut: 'a_faire', date_executee: null }).eq('id', actionId);
+    toast.success('Action remise en attente');
+    if (selected) {
+      const { data } = await supabase.from('actions_relance').select('*').eq('facture_id', selected.id).order('date_prevue', { ascending: false });
+      setActionsHistory((data || []) as unknown as ActionRelance[]);
+    }
+  };
+
+  const handleLitige = async () => {
+    if (!litigeModal || !litigeNote.trim()) return;
+    await supabase.from('factures').update({ statut: 'litige', notes_litige: litigeNote.trim() }).eq('id', litigeModal.id);
+    setFactures(prev => prev.map(f => f.id === litigeModal.id ? { ...f, statut: 'litige' } : f));
+    toast.success(`Facture ${litigeModal.numero_facture} marquée en litige`);
+    setLitigeModal(null);
+    setLitigeNote('');
+  };
+
+  const removeLitige = async (f: Facture, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('Retirer le litige et remettre la facture en cours ?')) return;
+    await supabase.from('factures').update({ statut: 'en_cours', notes_litige: null }).eq('id', f.id);
+    setFactures(prev => prev.map(fac => fac.id === f.id ? { ...fac, statut: 'en_cours' } : fac));
+    toast.success(`Litige retiré pour ${f.numero_facture}`);
+  };
+
   if (loading) return <div className="flex items-center justify-center h-64 text-muted-foreground">Chargement...</div>;
 
   return (
     <div className="space-y-6 max-w-7xl">
-      <h1 className="text-2xl font-bold">Créances en cours</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Créances en cours</h1>
+        <CountryFilter />
+      </div>
 
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input placeholder="Rechercher client ou facture..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
         </div>
-        <Select value={paysFilter} onValueChange={setPaysFilter}>
-          <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Tous pays</SelectItem>
-            <SelectItem value="PT">Portugal</SelectItem>
-            <SelectItem value="FR">France</SelectItem>
-          </SelectContent>
-        </Select>
         <Select value={retardFilter} onValueChange={setRetardFilter}>
           <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -219,14 +259,18 @@ export default function Creances() {
             <SelectItem value=">30">{'>  30 jours'}</SelectItem>
           </SelectContent>
         </Select>
-        <div className="flex items-center gap-2">
-          <Switch checked={showAllMovements} onCheckedChange={setShowAllMovements} id="show-all" />
-          <Label htmlFor="show-all" className="text-sm whitespace-nowrap">Tous mouvements</Label>
-        </div>
+        <Button
+          variant={showLitiges ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => { setShowLitiges(!showLitiges); if (!showLitiges) setShowArchived(false); }}
+        >
+          <Scale className="h-4 w-4 mr-1" />
+          {showLitiges ? 'Voir actifs' : 'Litiges'}
+        </Button>
         <Button
           variant={showArchived ? 'default' : 'outline'}
           size="sm"
-          onClick={() => setShowArchived(!showArchived)}
+          onClick={() => { setShowArchived(!showArchived); if (!showArchived) setShowLitiges(false); }}
         >
           <Archive className="h-4 w-4 mr-1" />
           {showArchived ? 'Voir actifs' : 'Archives'}
@@ -238,51 +282,55 @@ export default function Creances() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/50">
-                <th className="text-left p-3 cursor-pointer hover:bg-muted" onClick={() => toggleSort('nom')}>Client {sortField === 'nom' && (sortAsc ? '↑' : '↓')}</th>
+                <th className="text-left p-3 cursor-pointer select-none hover:bg-muted" onClick={() => toggleSort('nom')}>
+                  <span className="inline-flex items-center gap-1">Client {sortField === 'nom' ? (sortAsc ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : null}</span>
+                </th>
                 <th className="text-left p-3">N° Facture</th>
-                <th className="text-left p-3">Type</th>
-                <th className="text-right p-3 cursor-pointer hover:bg-muted" onClick={() => toggleSort('montant')}>Montant {sortField === 'montant' && (sortAsc ? '↑' : '↓')}</th>
-                <th className="text-right p-3">Reste dû</th>
+                <th className="text-right p-3 cursor-pointer select-none hover:bg-muted" onClick={() => toggleSort('montant')}>
+                  <span className="inline-flex items-center gap-1 justify-end">Montant dû {sortField === 'montant' ? (sortAsc ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowDown className="h-3 w-3 text-muted-foreground/40" />}</span>
+                </th>
                 <th className="text-left p-3">Échéance</th>
-                <th className="text-center p-3 cursor-pointer hover:bg-muted" onClick={() => toggleSort('retard')}>Retard {sortField === 'retard' && (sortAsc ? '↑' : '↓')}</th>
+                <th className="text-center p-3 cursor-pointer select-none hover:bg-muted" onClick={() => toggleSort('retard')}>
+                  <span className="inline-flex items-center gap-1 justify-center">Retard {sortField === 'retard' ? (sortAsc ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowDown className="h-3 w-3 text-muted-foreground/40" />}</span>
+                </th>
                 <th className="text-left p-3">Pays</th>
                 <th className="text-center p-3">Action</th>
+                <th className="text-center p-3"></th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((f) => {
                 const retard = joursRetard(f.date_echeance);
                 const badge = retardBadge(retard);
-                const isMovement = f.type_document !== 'FACT';
-                const actionDef = !isMovement ? getActionType(retard) : null;
+                const actionDef = getActionType(retard);
                 const ActionIcon = actionDef?.icon;
                 return (
-                  <tr key={f.id} className={`border-b hover:bg-muted/30 cursor-pointer ${isMovement ? 'text-muted-foreground bg-muted/20' : ''}`} onClick={() => openDetail(f)}>
+                  <tr key={f.id} className="border-b hover:bg-muted/30 cursor-pointer" onClick={() => openDetail(f)}>
                     <td className="p-3 font-medium" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center gap-1">
-                        <span className="cursor-pointer" onClick={() => openDetail(f)}>{f.clients?.nom}</span>
-                        {showArchived ? (
-                          <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground" onClick={(e) => archiveClient(f, false, e)}>
-                            <RotateCcw className="h-3 w-3" />
-                          </Button>
-                        ) : (
-                          <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground" onClick={(e) => archiveClient(f, true, e)}>
-                            <Archive className="h-3 w-3" />
-                          </Button>
-                        )}
-                      </div>
+                      <button
+                        className="text-left text-primary hover:underline"
+                        onClick={() => navigate(`/clients/${f.client_id}`)}
+                      >
+                        {f.clients?.nom}
+                      </button>
                     </td>
-                    <td className="p-3 text-muted-foreground">{f.numero_facture}</td>
-                    <td className="p-3">
-                      {isMovement ? <Badge variant="outline" className="text-xs">{f.type_document}</Badge> : f.type_document}
+                    <td className="p-3 text-muted-foreground">
+                      {f.numero_facture}
+                      {f.statut === 'litige' && <Badge className="ml-2 bg-badge-danger text-badge-danger-foreground">Litige</Badge>}
+                      {f.statut === 'retention_dgd' && (
+                        <Badge className="ml-2 bg-badge-info text-badge-info-foreground">
+                          DGD {f.date_reception_dgd && `→ ${new Date(new Date(f.date_reception_dgd).setFullYear(new Date(f.date_reception_dgd).getFullYear() + 1)).toLocaleDateString('fr-FR')}`}
+                        </Badge>
+                      )}
                     </td>
-                    <td className="p-3 text-right text-muted-foreground">{formatCurrency(f.montant)}</td>
                     <td className="p-3 text-right font-medium">{formatCurrency(f.solde_restant ?? f.montant)}</td>
                     <td className="p-3 text-muted-foreground">{f.date_echeance}</td>
                     <td className="p-3 text-center"><Badge className={badge.className}>{badge.label}</Badge></td>
-                    <td className="p-3">{f.source}</td>
+                    <td className="p-3">{f.clients?.code_client.startsWith('FR_') ? '🇫🇷 FR' : f.clients?.code_client.startsWith('PT_') ? '🇵🇹 PT' : f.source}</td>
                     <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
-                      {actionDef && ActionIcon ? (
+                      {(f.statut === 'litige' || f.statut === 'retention_dgd') ? (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      ) : actionDef && ActionIcon ? (
                         <Button
                           size="sm"
                           variant={actionDef.type === 'mise_en_demeure_j30' ? 'destructive' : actionDef.type === 'appel_j15' ? 'outline' : 'default'}
@@ -293,14 +341,46 @@ export default function Creances() {
                           {generatingId === f.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <ActionIcon className="h-3 w-3" />}
                           {actionDef.label}
                         </Button>
-                      ) : !isMovement ? (
+                      ) : (
                         <span className="text-xs text-muted-foreground">—</span>
-                      ) : null}
+                      )}
+                    </td>
+                    <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-center gap-1">
+                        {f.statut === 'litige' ? (
+                          <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={(e) => removeLitige(f, e)} title="Retirer le litige">
+                            <RotateCcw className="h-3.5 w-3.5" />
+                          </Button>
+                        ) : showArchived ? (
+                          <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={(e) => archiveFacture(f, false, e)}>
+                            <RotateCcw className="h-3.5 w-3.5" />
+                          </Button>
+                        ) : (
+                          <>
+                            <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={(e) => { e.stopPropagation(); setLitigeModal(f); setLitigeNote(''); }} title="Marquer en litige">
+                              <Scale className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={(e) => archiveFacture(f, true, e)}>
+                              <Archive className="h-3.5 w-3.5" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
               })}
             </tbody>
+            {filtered.length > 0 && (
+              <tfoot>
+                <tr className="border-t-2 bg-muted/30 font-semibold">
+                  <td className="p-3">{filtered.length} factures</td>
+                  <td className="p-3"></td>
+                  <td className="p-3 text-right">{formatCurrency(filtered.reduce((s, f) => s + (f.solde_restant ?? f.montant), 0))}</td>
+                  <td className="p-3" colSpan={5}></td>
+                </tr>
+              </tfoot>
+            )}
           </table>
           {filtered.length === 0 && <p className="text-center text-muted-foreground py-8">Aucune facture trouvée.</p>}
         </CardContent>
@@ -330,7 +410,14 @@ export default function Creances() {
                   <div key={a.id} className="border rounded-md p-3 text-sm space-y-1">
                     <div className="flex items-center justify-between">
                       <span className="font-medium">{TYPE_ACTION_LABELS[a.type_action] || a.type_action}</span>
-                      <Badge variant={a.statut === 'fait' ? 'default' : 'secondary'}>{STATUT_LABELS[a.statut] || a.statut}</Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={a.statut === 'fait' ? 'default' : 'secondary'}>{STATUT_LABELS[a.statut] || a.statut}</Badge>
+                        {a.statut === 'fait' && (
+                          <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => reopenAction(a.id)} title="Réouvrir">
+                            <Undo2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
                     <p className="text-muted-foreground">Prévue: {a.date_prevue} {a.date_executee && `| Exécutée: ${a.date_executee}`}</p>
                     {a.notes && <p className="text-xs whitespace-pre-line mt-1">{a.notes}</p>}
@@ -341,6 +428,28 @@ export default function Creances() {
           )}
         </SheetContent>
       </Sheet>
+
+      {litigeModal && (
+        <div className="fixed inset-0 bg-foreground/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-card rounded-lg p-6 w-full max-w-md space-y-4">
+            <h3 className="font-semibold">Marquer en litige</h3>
+            <p className="text-sm text-muted-foreground">
+              Facture <span className="font-medium text-foreground">{litigeModal.numero_facture}</span> — {litigeModal.clients?.nom}
+            </p>
+            <textarea
+              className="w-full border rounded-md p-3 text-sm min-h-[80px] bg-background"
+              placeholder="Décrivez le motif du litige..."
+              value={litigeNote}
+              onChange={(e) => setLitigeNote(e.target.value)}
+              autoFocus
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setLitigeModal(null)}>Annuler</Button>
+              <Button variant="destructive" onClick={handleLitige} disabled={!litigeNote.trim()}>Confirmer le litige</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
