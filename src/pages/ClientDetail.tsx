@@ -78,6 +78,7 @@ export default function ClientDetail() {
   const [dgdModal, setDgdModal] = useState<Facture | null>(null);
   const [dgdDate, setDgdDate] = useState('');
   const [manualActionModal, setManualActionModal] = useState(false);
+  const [manualMode, setManualMode] = useState<'past' | 'scheduled'>('past');
   const [manualType, setManualType] = useState('appel_manuel');
   const [manualDate, setManualDate] = useState('');
   const [manualNotes, setManualNotes] = useState('');
@@ -209,19 +210,21 @@ export default function ClientDetail() {
   const addManualAction = async () => {
     if (!client || !manualDate || !manualNotes.trim()) return;
     setSavingManual(true);
+    const isScheduled = manualMode === 'scheduled';
     await supabase.from('actions_relance').insert({
       client_id: client.id,
       facture_id: manualFactureId !== 'none' ? manualFactureId : null,
       type_action: manualType,
       date_prevue: manualDate,
-      date_executee: manualDate,
-      statut: 'fait',
+      date_executee: isScheduled ? null : manualDate,
+      statut: isScheduled ? 'a_faire' : 'fait',
       notes: manualNotes.trim(),
     });
     const { data } = await supabase.from('actions_relance').select('*, factures(numero_facture)').eq('client_id', id).order('date_prevue', { ascending: false });
     setActions((data || []) as unknown as Action[]);
-    toast.success('Action ajoutée à l\'historique');
+    toast.success(isScheduled ? `Action programmée pour le ${manualDate}` : 'Action ajoutée à l\'historique');
     setManualActionModal(false);
+    setManualMode('past');
     setManualType('appel_manuel');
     setManualDate('');
     setManualNotes('');
@@ -496,9 +499,25 @@ export default function ClientDetail() {
       {manualActionModal && (
         <div className="fixed inset-0 bg-foreground/50 flex items-center justify-center z-50 p-4">
           <div className="bg-card rounded-lg p-6 w-full max-w-md space-y-4">
-            <h3 className="font-semibold">Ajouter une action passée</h3>
+            <h3 className="font-semibold">{manualMode === 'scheduled' ? 'Programmer une action' : 'Ajouter une action passée'}</h3>
+            <div className="flex gap-1 rounded-lg bg-muted p-1">
+              <button
+                className={`flex-1 text-xs font-medium px-3 py-1.5 rounded-md transition-colors ${manualMode === 'past' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                onClick={() => setManualMode('past')}
+              >
+                Action passée
+              </button>
+              <button
+                className={`flex-1 text-xs font-medium px-3 py-1.5 rounded-md transition-colors ${manualMode === 'scheduled' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                onClick={() => setManualMode('scheduled')}
+              >
+                Programmer
+              </button>
+            </div>
             <p className="text-xs text-muted-foreground">
-              Tracez une action de relance effectuée avant la mise en place de l'outil.
+              {manualMode === 'scheduled'
+                ? 'Cette action apparaîtra dans le rapport du jour à la date prévue.'
+                : 'Tracez une action de relance déjà effectuée.'}
             </p>
             <div className="space-y-2">
               <Label>Type d'action</Label>
@@ -512,7 +531,7 @@ export default function ClientDetail() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Date de l'action</Label>
+              <Label>{manualMode === 'scheduled' ? 'Date prévue' : "Date de l'action"}</Label>
               <Input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} />
             </div>
             <div className="space-y-2">
@@ -528,10 +547,10 @@ export default function ClientDetail() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Description / Notes</Label>
+              <Label>{manualMode === 'scheduled' ? 'Description de l\'action à réaliser' : 'Description / Notes'}</Label>
               <textarea
                 className="w-full border rounded-md p-3 text-sm min-h-[80px] bg-background"
-                placeholder="Ex: Appel au client, laissé un message vocal concernant les factures impayées..."
+                placeholder={manualMode === 'scheduled' ? 'Ex: Appeler le client suite au dernier mail de relance...' : 'Ex: Appel au client, laissé un message vocal concernant les factures impayées...'}
                 value={manualNotes}
                 onChange={(e) => setManualNotes(e.target.value)}
                 autoFocus
@@ -540,7 +559,7 @@ export default function ClientDetail() {
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setManualActionModal(false)}>Annuler</Button>
               <Button onClick={addManualAction} disabled={!manualDate || !manualNotes.trim() || savingManual}>
-                Ajouter à l'historique
+                {manualMode === 'scheduled' ? 'Programmer' : 'Ajouter à l\'historique'}
               </Button>
             </div>
           </div>

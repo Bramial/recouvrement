@@ -72,6 +72,12 @@ const TYPE_ACTION_LABELS: Record<string, { label: string; className: string }> =
   appel_j15: { label: 'Appel J+15', className: 'bg-badge-warning text-badge-warning-foreground' },
   email_j7: { label: 'Email J+7', className: 'bg-badge-info text-badge-info-foreground' },
   rappel_dgd: { label: 'Rappel DGD', className: 'bg-badge-info text-badge-info-foreground' },
+  appel_manuel: { label: 'Appel', className: 'bg-badge-warning text-badge-warning-foreground' },
+  email_manuel: { label: 'Email', className: 'bg-badge-info text-badge-info-foreground' },
+  relance_manuel: { label: 'Relance', className: 'bg-badge-info text-badge-info-foreground' },
+  courrier_manuel: { label: 'Courrier', className: 'bg-muted text-muted-foreground' },
+  mise_en_demeure_manuel: { label: 'Mise en demeure', className: 'bg-badge-danger text-badge-danger-foreground' },
+  autre_manuel: { label: 'Autre', className: 'bg-muted text-muted-foreground' },
 };
 
 function formatCurrency(n: number | null | undefined) {
@@ -361,6 +367,7 @@ export default function RapportDuJour() {
                 const badge = TYPE_ACTION_LABELS[action.type_action] || { label: action.type_action, className: 'bg-muted text-muted-foreground' };
                 const isEmail = action.type_action === 'email_j7' || action.type_action === 'mise_en_demeure_j30';
                 const isCall = action.type_action === 'appel_j15';
+                const isManual = action.type_action.endsWith('_manuel');
 
                 return (
                   <div key={action.id} className="border rounded-lg p-4 flex flex-col lg:flex-row lg:items-center gap-3">
@@ -368,17 +375,20 @@ export default function RapportDuJour() {
                       <div className="flex items-center gap-2 flex-wrap">
                         <Badge className={badge.className}>{badge.label}</Badge>
                         <span className="font-semibold text-sm">{action.clients?.nom}</span>
-                        <span className="text-xs text-muted-foreground">#{action.factures?.numero_facture}</span>
+                        {action.factures?.numero_facture && <span className="text-xs text-muted-foreground">#{action.factures.numero_facture}</span>}
                       </div>
                       <div className="flex items-center gap-4 mt-1.5 text-sm text-muted-foreground flex-wrap">
-                        <span>{formatCurrency(action.factures?.solde_restant ?? action.factures?.montant ?? 0)}</span>
-                        <span className={retard > 30 ? 'text-badge-danger font-medium' : retard > 15 ? 'text-badge-warning font-medium' : ''}>
-                          {retard > 0 ? `${retard}j de retard` : 'À échéance'}
-                        </span>
+                        {action.factures && <span>{formatCurrency(action.factures.solde_restant ?? action.factures.montant ?? 0)}</span>}
+                        {action.factures ? (
+                          <span className={retard > 30 ? 'text-badge-danger font-medium' : retard > 15 ? 'text-badge-warning font-medium' : ''}>
+                            {retard > 0 ? `${retard}j de retard` : 'À échéance'}
+                          </span>
+                        ) : null}
                         {isCall && action.clients?.telephone && (
                           <a href={`tel:${action.clients.telephone}`} className="text-primary underline">{action.clients.telephone}</a>
                         )}
                       </div>
+                      {action.notes && <p className="text-xs text-muted-foreground mt-1.5 whitespace-pre-line">{action.notes}</p>}
                     </div>
                     <div className="flex items-center gap-2 flex-wrap shrink-0">
                       {isEmail && (
@@ -389,6 +399,11 @@ export default function RapportDuJour() {
                       {isCall && (
                         <Button size="sm" variant="default" onClick={() => setCallModal(action)}>
                           <Phone className="h-3.5 w-3.5 mr-1" /> Appel fait
+                        </Button>
+                      )}
+                      {isManual && (
+                        <Button size="sm" variant="default" onClick={() => setCallModal(action)}>
+                          <CheckCircle className="h-3.5 w-3.5 mr-1" /> Fait
                         </Button>
                       )}
                       <Button size="sm" variant="outline" onClick={() => setReportModal(action)}>
