@@ -47,7 +47,9 @@ export default function Clients() {
     let clientsQuery = supabase.from('clients').select('*');
     if (country !== 'all') clientsQuery = clientsQuery.ilike('code_client', `${country}_%`);
     const { data: clientsData } = await clientsQuery;
-    let facturesQuery = supabase.from('factures').select('client_id, solde_restant, montant, type_document, date_echeance').eq('statut', 'en_cours');
+    let facturesQuery = supabase.from('factures').select('client_id, solde_restant, montant, type_document, date_echeance')
+      .in('statut', ['en_cours', 'retention_dgd'])
+      .in('type_document', ['FACT', 'NDEB']);
     if (maxMois) facturesQuery = facturesQuery.eq('mois_extraction', maxMois);
     const { data: facturesData } = await facturesQuery;
 

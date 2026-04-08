@@ -117,9 +117,9 @@ export default function ClientDetail() {
   }, [id]);
 
   const activeFactures = allFactures.filter(f => showPertes ? f.statut === 'perte' : (f.statut === 'en_cours' || f.statut === 'litige' || f.statut === 'retention_dgd'));
-  const invoices = activeFactures.filter(f => f.type_document === 'FACT');
-  const movements = activeFactures.filter(f => f.type_document !== 'FACT');
-  const totalResteDu = activeFactures.reduce((s, f) => s + Number(f.solde_restant ?? f.montant ?? 0), 0);
+  const invoices = activeFactures.filter(f => f.type_document === 'FACT' || f.type_document === 'NDEB');
+  const movements = activeFactures.filter(f => f.type_document === 'REC' || f.type_document === 'NCRE');
+  const totalResteDu = invoices.reduce((s, f) => s + Number(f.solde_restant ?? f.montant ?? 0), 0);
   const pertesCount = allFactures.filter(f => f.statut === 'perte').length;
 
   const perteFacture = async (facture: Facture, perte: boolean) => {

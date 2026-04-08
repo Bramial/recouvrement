@@ -89,7 +89,9 @@ export default function Creances() {
     const load = async () => {
       const maxMois = await getMaxMoisExtraction();
       const joinType = country !== 'all' ? 'clients!inner' : 'clients';
-      let query = supabase.from('factures').select(`*, ${joinType}(nom, code_client, exclusion_relance, client_interne)`).in('statut', ['en_cours', 'litige', 'retention_dgd']);
+      let query = supabase.from('factures').select(`*, ${joinType}(nom, code_client, exclusion_relance, client_interne)`)
+        .in('statut', ['en_cours', 'litige', 'retention_dgd'])
+        .in('type_document', ['FACT', 'NDEB']);
       if (maxMois) query = query.eq('mois_extraction', maxMois);
       if (country !== 'all') query = query.ilike('clients.code_client', `${country}_%`);
       query = query.order('date_echeance', { ascending: true });
@@ -124,10 +126,8 @@ export default function Creances() {
         return true;
       });
     }
-    // Total algébrique incluant les montants négatifs
+    // Total des créances (soldes recalculés, uniquement FACT/NDEB)
     const totalAlgebrique = res.reduce((s, f) => s + (f.solde_restant ?? f.montant), 0);
-    // Exclure les lignes négatives de l'affichage (pas de relance sur montants négatifs)
-    res = res.filter(f => (f.solde_restant ?? f.montant) > 0);
     res = [...res].sort((a, b) => {
       let cmp = 0;
       if (sortField === 'retard') cmp = joursRetard(b.date_echeance) - joursRetard(a.date_echeance);
@@ -154,6 +154,10 @@ export default function Creances() {
 
   const generateAction = async (f: Facture, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (f.type_document === 'REC' || f.type_document === 'NCRE') {
+      toast.warning('Pas de relance sur les règlements/avoirs.');
+      return;
+    }
     if (f.statut === 'litige') {
       toast.warning('Cette facture est en litige.');
       return;
