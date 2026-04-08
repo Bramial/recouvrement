@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { Search, Mail, Phone, AlertTriangle, Loader2, Archive, RotateCcw, ArrowUp, ArrowDown, Undo2, Scale, ShieldCheck } from 'lucide-react';
+import { Search, Mail, Phone, AlertTriangle, Loader2, XOctagon, RotateCcw, ArrowUp, ArrowDown, Undo2, Scale, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { useCountryFilter } from '@/hooks/useCountryFilter';
@@ -76,7 +76,7 @@ export default function Creances() {
   const [search, setSearch] = useState('');
   const { country } = useCountryFilter();
   const [retardFilter, setRetardFilter] = useState('all');
-  const [showArchived, setShowArchived] = useState(false);
+  const [showPertes, setShowPertes] = useState(false);
   const [sortField, setSortField] = useState<'retard' | 'montant' | 'nom'>('retard');
   const [sortAsc, setSortAsc] = useState(false);
   const [showLitiges, setShowLitiges] = useState(false);
@@ -90,7 +90,7 @@ export default function Creances() {
     const load = async () => {
       const maxMois = await getMaxMoisExtraction();
       const joinType = country !== 'all' ? 'clients!inner' : 'clients';
-      let query = supabase.from('factures').select(`*, ${joinType}(nom, code_client, exclusion_relance)`).in('statut', ['en_cours', 'archivee', 'litige', 'retention_dgd']);
+      let query = supabase.from('factures').select(`*, ${joinType}(nom, code_client, exclusion_relance)`).in('statut', ['en_cours', 'perte', 'litige', 'retention_dgd']);
       if (maxMois) query = query.eq('mois_extraction', maxMois);
       if (country !== 'all') query = query.ilike('clients.code_client', `${country}_%`);
       query = query.order('date_echeance', { ascending: true });
@@ -106,13 +106,12 @@ export default function Creances() {
     // Filter by statut view mode
     if (showLitiges) {
       res = res.filter(f => f.statut === 'litige');
-    } else if (showArchived) {
-      res = res.filter(f => f.statut === 'archivee');
+    } else if (showPertes) {
+      res = res.filter(f => f.statut === 'perte');
     } else {
       res = res.filter(f => f.statut === 'en_cours' || f.statut === 'retention_dgd');
     }
-    // Only show FACT with positive solde
-    res = res.filter(f => f.type_document === 'FACT' && (f.solde_restant ?? f.montant) > 0);
+    // Show all document types (FACT, REC, NCRE, NDEB)
     if (search) {
       const s = search.toLowerCase();
       res = res.filter(f => f.clients?.nom.toLowerCase().includes(s) || f.numero_facture.toLowerCase().includes(s));
@@ -135,14 +134,14 @@ export default function Creances() {
       return sortAsc ? -cmp : cmp;
     });
     return res;
-  }, [factures, search, retardFilter, sortField, sortAsc, showArchived, showLitiges]);
+  }, [factures, search, retardFilter, sortField, sortAsc, showPertes, showLitiges]);
 
-  const archiveFacture = async (f: Facture, archive: boolean, e: React.MouseEvent) => {
+  const perteFacture = async (f: Facture, perte: boolean, e: React.MouseEvent) => {
     e.stopPropagation();
-    const newStatut = archive ? 'archivee' : 'en_cours';
+    const newStatut = perte ? 'perte' : 'en_cours';
     await supabase.from('factures').update({ statut: newStatut }).eq('id', f.id);
     setFactures(prev => prev.map(fac => fac.id === f.id ? { ...fac, statut: newStatut } : fac));
-    toast.success(archive ? `Facture ${f.numero_facture} archivée` : `Facture ${f.numero_facture} restaurée`);
+    toast.success(perte ? `Facture ${f.numero_facture} passée en perte` : `Facture ${f.numero_facture} restaurée`);
   };
 
   const openDetail = async (f: Facture) => {
@@ -262,18 +261,18 @@ export default function Creances() {
         <Button
           variant={showLitiges ? 'default' : 'outline'}
           size="sm"
-          onClick={() => { setShowLitiges(!showLitiges); if (!showLitiges) setShowArchived(false); }}
+          onClick={() => { setShowLitiges(!showLitiges); if (!showLitiges) setShowPertes(false); }}
         >
           <Scale className="h-4 w-4 mr-1" />
           {showLitiges ? 'Voir actifs' : 'Litiges'}
         </Button>
         <Button
-          variant={showArchived ? 'default' : 'outline'}
+          variant={showPertes ? 'default' : 'outline'}
           size="sm"
-          onClick={() => { setShowArchived(!showArchived); if (!showArchived) setShowLitiges(false); }}
+          onClick={() => { setShowPertes(!showPertes); if (!showPertes) setShowLitiges(false); }}
         >
-          <Archive className="h-4 w-4 mr-1" />
-          {showArchived ? 'Voir actifs' : 'Archives'}
+          <XOctagon className="h-4 w-4 mr-1" />
+          {showPertes ? 'Voir actifs' : 'Pertes'}
         </Button>
       </div>
 
@@ -316,6 +315,7 @@ export default function Creances() {
                     </td>
                     <td className="p-3 text-muted-foreground">
                       {f.numero_facture}
+                      {f.type_document !== 'FACT' && <Badge variant="outline" className="ml-2 text-xs">{f.type_document}</Badge>}
                       {f.statut === 'litige' && <Badge className="ml-2 bg-badge-danger text-badge-danger-foreground">Litige</Badge>}
                       {f.statut === 'retention_dgd' && (
                         <Badge className="ml-2 bg-badge-info text-badge-info-foreground">
@@ -351,8 +351,8 @@ export default function Creances() {
                           <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={(e) => removeLitige(f, e)} title="Retirer le litige">
                             <RotateCcw className="h-3.5 w-3.5" />
                           </Button>
-                        ) : showArchived ? (
-                          <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={(e) => archiveFacture(f, false, e)}>
+                        ) : showPertes ? (
+                          <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={(e) => perteFacture(f, false, e)}>
                             <RotateCcw className="h-3.5 w-3.5" />
                           </Button>
                         ) : (
@@ -360,8 +360,8 @@ export default function Creances() {
                             <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={(e) => { e.stopPropagation(); setLitigeModal(f); setLitigeNote(''); }} title="Marquer en litige">
                               <Scale className="h-3.5 w-3.5" />
                             </Button>
-                            <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={(e) => archiveFacture(f, true, e)}>
-                              <Archive className="h-3.5 w-3.5" />
+                            <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={(e) => perteFacture(f, true, e)} title="Passer en perte">
+                              <XOctagon className="h-3.5 w-3.5" />
                             </Button>
                           </>
                         )}
@@ -374,7 +374,7 @@ export default function Creances() {
             {filtered.length > 0 && (
               <tfoot>
                 <tr className="border-t-2 bg-muted/30 font-semibold">
-                  <td className="p-3">{filtered.length} factures</td>
+                  <td className="p-3">{filtered.length} documents</td>
                   <td className="p-3"></td>
                   <td className="p-3 text-right">{formatCurrency(filtered.reduce((s, f) => s + (f.solde_restant ?? f.montant), 0))}</td>
                   <td className="p-3" colSpan={5}></td>

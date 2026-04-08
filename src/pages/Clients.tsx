@@ -53,13 +53,11 @@ export default function Clients() {
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const facStats: Record<string, { count: number; total: number; totalOriginal: number; retardMax: number }> = {};
     (facturesData || []).forEach((f: any) => {
-      // Only count FACT with positive solde_restant
-      if (f.type_document !== 'FACT' || (f.solde_restant ?? f.montant) <= 0) return;
       if (!facStats[f.client_id]) facStats[f.client_id] = { count: 0, total: 0, totalOriginal: 0, retardMax: 0 };
       facStats[f.client_id].count++;
       facStats[f.client_id].total += Number(f.solde_restant ?? f.montant ?? 0);
       facStats[f.client_id].totalOriginal += Number(f.montant ?? 0);
-      if (f.date_echeance) {
+      if (f.type_document === 'FACT' && f.date_echeance) {
         const ech = new Date(f.date_echeance); ech.setHours(0, 0, 0, 0);
         const jours = Math.floor((today.getTime() - ech.getTime()) / (1000 * 60 * 60 * 24));
         if (jours > facStats[f.client_id].retardMax) facStats[f.client_id].retardMax = jours;
@@ -182,7 +180,7 @@ export default function Clients() {
                 <th className="text-left p-3">Code</th>
                 <th className="text-left p-3">Nom</th>
                 <th className="text-left p-3">Pays</th>
-                <th className="text-right p-3">Factures</th>
+                <th className="text-right p-3">Documents</th>
                 <th className="text-right p-3 cursor-pointer select-none hover:bg-muted" onClick={() => toggleSort('total_original')}>
                   <span className="inline-flex items-center gap-1 justify-end">
                     Montant total

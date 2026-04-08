@@ -6,13 +6,13 @@ interface KPICardProps {
   value: string;
   subtitle?: string;
   icon: LucideIcon;
-  variant?: 'default' | 'danger' | 'success';
+  variant?: 'default' | 'danger' | 'success' | 'warning';
   trend?: { direction: 'up' | 'down'; label: string; positive: boolean } | null;
   onClick?: () => void;
 }
 
 export function KPICard({ title, value, subtitle, icon: Icon, variant = 'default', trend, onClick }: KPICardProps) {
-  const iconColorClass = variant === 'danger' ? 'text-badge-danger' : variant === 'success' ? 'text-badge-success' : 'text-primary';
+  const iconColorClass = variant === 'danger' ? 'text-badge-danger' : variant === 'warning' ? 'text-badge-warning' : variant === 'success' ? 'text-badge-success' : 'text-primary';
 
   return (
     <Card className={onClick ? 'cursor-pointer hover:bg-accent/50 transition-colors' : ''} onClick={onClick}>

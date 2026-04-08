@@ -9,7 +9,7 @@ import { NoteModal } from '@/components/NoteModal';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Euro, AlertTriangle, ListChecks, CheckCircle, Mail, Phone, Calendar, X, MessageSquare, FileText, Receipt, Globe } from 'lucide-react';
+import { Euro, AlertTriangle, ListChecks, CheckCircle, Mail, Phone, Calendar, X, MessageSquare, FileText, Receipt, Globe, Scale, XOctagon } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -53,6 +53,11 @@ interface KpiExtras {
   totalPT: number;
   facturesReglees: FactureResume[];
   nouvellesFactures: FactureResume[];
+  totalLitiges: number;
+  totalLitigesPrev: number;
+  nbLitiges: number;
+  totalPertes: number;
+  totalPertesPrev: number;
 }
 
 const TYPE_ACTION_ORDER: Record<string, number> = {
@@ -118,7 +123,7 @@ export default function RapportDuJour() {
     setRapport(rapportRes.data as Rapport | null);
     // Filter out actions linked to archived invoices
     const allActions = ((actionsRes.data || []) as unknown as Action[])
-      .filter(a => a.factures?.statut !== 'archivee' && a.factures?.statut !== 'litige')
+      .filter(a => a.factures?.statut !== 'perte' && a.factures?.statut !== 'litige')
       .sort((a, b) => (TYPE_ACTION_ORDER[a.type_action] ?? 9) - (TYPE_ACTION_ORDER[b.type_action] ?? 9));
     setActions(allActions);
 
@@ -161,8 +166,24 @@ export default function RapportDuJour() {
         .eq('mois_extraction', prevMois);
       if (country !== 'all') prevNumQuery = prevNumQuery.eq('source', country);
 
-      const [currentRes, prevRes, regleesRes, currentAllRes, prevNumRes] = await Promise.all([
-        currentQuery, prevQuery, regleesQuery, currentAllQuery, prevNumQuery,
+      // Litiges current & previous
+      let litigesQuery = supabase.from('factures')
+        .select('solde_restant').eq('mois_extraction', maxMois).eq('statut', 'litige');
+      if (country !== 'all') litigesQuery = litigesQuery.eq('source', country);
+      let litigesPrevQuery = supabase.from('factures')
+        .select('solde_restant').eq('mois_extraction', prevMois).eq('statut', 'litige');
+      if (country !== 'all') litigesPrevQuery = litigesPrevQuery.eq('source', country);
+
+      // Pertes current & previous
+      let pertesQuery = supabase.from('factures')
+        .select('solde_restant').eq('mois_extraction', maxMois).eq('statut', 'pertes_profits');
+      if (country !== 'all') pertesQuery = pertesQuery.eq('source', country);
+      let pertesPrevQuery = supabase.from('factures')
+        .select('solde_restant').eq('mois_extraction', prevMois).eq('statut', 'pertes_profits');
+      if (country !== 'all') pertesPrevQuery = pertesPrevQuery.eq('source', country);
+
+      const [currentRes, prevRes, regleesRes, currentAllRes, prevNumRes, litigesRes, litigesPrevRes, pertesRes, pertesPrevRes] = await Promise.all([
+        currentQuery, prevQuery, regleesQuery, currentAllQuery, prevNumQuery, litigesQuery, litigesPrevQuery, pertesQuery, pertesPrevQuery,
       ]);
 
       const currentData = (currentRes.data || []) as { solde_restant: number | null; source: string | null }[];
@@ -190,6 +211,11 @@ export default function RapportDuJour() {
       const totalFR = currentData.filter(f => f.source === 'FR').reduce((sum, f) => sum + (f.solde_restant || 0), 0);
       const totalPT = currentData.filter(f => f.source === 'PT').reduce((sum, f) => sum + (f.solde_restant || 0), 0);
 
+      const litigesData = (litigesRes.data || []) as { solde_restant: number | null }[];
+      const litigesPrevData = (litigesPrevRes.data || []) as { solde_restant: number | null }[];
+      const pertesData = (pertesRes.data || []) as { solde_restant: number | null }[];
+      const pertesPrevData = (pertesPrevRes.data || []) as { solde_restant: number | null }[];
+
       setKpiExtras({
         totalCreances,
         totalCreancesPrev,
@@ -197,6 +223,11 @@ export default function RapportDuJour() {
         totalPT,
         facturesReglees,
         nouvellesFactures,
+        totalLitiges: litigesData.reduce((s, f) => s + (f.solde_restant || 0), 0),
+        totalLitigesPrev: litigesPrevData.reduce((s, f) => s + (f.solde_restant || 0), 0),
+        nbLitiges: litigesData.length,
+        totalPertes: pertesData.reduce((s, f) => s + (f.solde_restant || 0), 0),
+        totalPertesPrev: pertesPrevData.reduce((s, f) => s + (f.solde_restant || 0), 0),
       });
     }
 
@@ -280,6 +311,39 @@ export default function RapportDuJour() {
           value={String(kpiExtras?.nouvellesFactures.length ?? 0)}
           icon={FileText}
           onClick={() => setShowNouvellesModal(true)}
+        />
+        <KPICard
+          title="Litiges en cours"
+          value={formatCurrency(kpiExtras?.totalLitiges ?? 0)}
+          subtitle={`${kpiExtras?.nbLitiges ?? 0} facture${(kpiExtras?.nbLitiges ?? 0) > 1 ? 's' : ''}`}
+          icon={Scale}
+          variant="warning"
+          trend={kpiExtras && kpiExtras.totalLitigesPrev > 0 ? (() => {
+            const diff = (kpiExtras.totalLitiges) - (kpiExtras.totalLitigesPrev);
+            const pct = Math.round(Math.abs(diff) / kpiExtras.totalLitigesPrev * 100);
+            if (pct === 0) return null;
+            return {
+              direction: diff > 0 ? 'up' as const : 'down' as const,
+              label: `${diff > 0 ? '+' : '-'}${pct}% vs mois préc.`,
+              positive: diff <= 0,
+            };
+          })() : null}
+        />
+        <KPICard
+          title="Pertes cumulées"
+          value={formatCurrency(kpiExtras?.totalPertes ?? 0)}
+          icon={XOctagon}
+          variant="danger"
+          trend={kpiExtras && kpiExtras.totalPertesPrev > 0 ? (() => {
+            const diff = (kpiExtras.totalPertes) - (kpiExtras.totalPertesPrev);
+            const pct = Math.round(Math.abs(diff) / kpiExtras.totalPertesPrev * 100);
+            if (pct === 0) return null;
+            return {
+              direction: diff > 0 ? 'up' as const : 'down' as const,
+              label: `${diff > 0 ? '+' : '-'}${pct}% vs mois préc.`,
+              positive: diff <= 0,
+            };
+          })() : null}
         />
       </div>
 

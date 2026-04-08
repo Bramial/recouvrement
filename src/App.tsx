@@ -12,6 +12,7 @@ import Clients from "@/pages/Clients";
 import ClientDetail from "@/pages/ClientDetail";
 import Historique from "@/pages/Historique";
 import FacturesReglees from "@/pages/FacturesReglees";
+import Pertes from "@/pages/Pertes";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -34,6 +35,7 @@ function ProtectedRoutes() {
         <Route path="/clients" element={<Clients />} />
         <Route path="/clients/:id" element={<ClientDetail />} />
         <Route path="/factures-reglees" element={<FacturesReglees />} />
+        <Route path="/pertes" element={<Pertes />} />
         <Route path="/historique" element={<Historique />} />
         <Route path="*" element={<NotFound />} />
       </Routes>

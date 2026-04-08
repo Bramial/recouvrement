@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Save, Archive, RotateCcw, ChevronDown, ChevronRight, Undo2, Scale, ShieldCheck, Plus } from 'lucide-react';
+import { ArrowLeft, Save, XOctagon, RotateCcw, ChevronDown, ChevronRight, Undo2, Scale, ShieldCheck, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Client {
@@ -68,7 +68,7 @@ export default function ClientDetail() {
   const [exclusion, setExclusion] = useState(false);
   const [saving, setSaving] = useState(false);
   const [movementsOpen, setMovementsOpen] = useState(false);
-  const [showArchived, setShowArchived] = useState(false);
+  const [showPertes, setShowPertes] = useState(false);
   const [allFactures, setAllFactures] = useState<Facture[]>([]);
   const [litigeModal, setLitigeModal] = useState<Facture | null>(null);
   const [litigeNote, setLitigeNote] = useState('');
@@ -88,7 +88,7 @@ export default function ClientDetail() {
     if (!id) return;
     const load = async () => {
       const maxMois = await getMaxMoisExtraction();
-      let facturesQuery = supabase.from('factures').select('*').eq('client_id', id).in('statut', ['en_cours', 'archivee', 'litige', 'retention_dgd']);
+      let facturesQuery = supabase.from('factures').select('*').eq('client_id', id).in('statut', ['en_cours', 'perte', 'litige', 'retention_dgd']);
       if (maxMois) facturesQuery = facturesQuery.eq('mois_extraction', maxMois);
 
       const [cRes, fRes, aRes] = await Promise.all([
@@ -113,16 +113,17 @@ export default function ClientDetail() {
     load();
   }, [id]);
 
-  const activeFactures = allFactures.filter(f => showArchived ? f.statut === 'archivee' : (f.statut === 'en_cours' || f.statut === 'litige' || f.statut === 'retention_dgd'));
-  const invoices = activeFactures.filter(f => f.type_document === 'FACT' && (f.solde_restant ?? f.montant) > 0);
+  const activeFactures = allFactures.filter(f => showPertes ? f.statut === 'perte' : (f.statut === 'en_cours' || f.statut === 'litige' || f.statut === 'retention_dgd'));
+  const invoices = activeFactures.filter(f => f.type_document === 'FACT');
   const movements = activeFactures.filter(f => f.type_document !== 'FACT');
-  const archivedCount = allFactures.filter(f => f.statut === 'archivee').length;
+  const totalResteDu = activeFactures.reduce((s, f) => s + Number(f.solde_restant ?? f.montant ?? 0), 0);
+  const pertesCount = allFactures.filter(f => f.statut === 'perte').length;
 
-  const archiveFacture = async (facture: Facture, archive: boolean) => {
-    const newStatut = archive ? 'archivee' : 'en_cours';
+  const perteFacture = async (facture: Facture, perte: boolean) => {
+    const newStatut = perte ? 'perte' : 'en_cours';
     await supabase.from('factures').update({ statut: newStatut }).eq('id', facture.id);
     setAllFactures(prev => prev.map(f => f.id === facture.id ? { ...f, statut: newStatut } : f));
-    toast.success(archive ? `Facture ${facture.numero_facture} archivée` : `Facture ${facture.numero_facture} restaurée`);
+    toast.success(perte ? `Facture ${facture.numero_facture} passée en perte` : `Facture ${facture.numero_facture} restaurée`);
   };
 
   const handleLitige = async () => {
@@ -272,11 +273,11 @@ export default function ClientDetail() {
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-base">{showArchived ? 'Factures archivées' : 'Factures en cours'} ({invoices.length})</CardTitle>
+            <CardTitle className="text-base">{showPertes ? 'Factures en perte' : 'Factures en cours'} ({invoices.length}) — Reste dû total : {formatCurrency(totalResteDu)}</CardTitle>
             <div className="flex items-center gap-2">
-              <Switch checked={showArchived} onCheckedChange={setShowArchived} id="show-archived" />
-              <Label htmlFor="show-archived" className="text-xs text-muted-foreground whitespace-nowrap">
-                Archivées{archivedCount > 0 && ` (${archivedCount})`}
+              <Switch checked={showPertes} onCheckedChange={setShowPertes} id="show-pertes" />
+              <Label htmlFor="show-pertes" className="text-xs text-muted-foreground whitespace-nowrap">
+                Pertes{pertesCount > 0 && ` (${pertesCount})`}
               </Label>
             </div>
           </div>
@@ -320,8 +321,8 @@ export default function ClientDetail() {
                       <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => removeLitige(f)} title="Retirer le litige">
                         <RotateCcw className="h-3.5 w-3.5" />
                       </Button>
-                    ) : showArchived ? (
-                      <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => archiveFacture(f, false)}>
+                    ) : showPertes ? (
+                      <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => perteFacture(f, false)}>
                         <RotateCcw className="h-3.5 w-3.5" />
                       </Button>
                     ) : (
@@ -332,8 +333,8 @@ export default function ClientDetail() {
                         <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => { setLitigeModal(f); setLitigeNote(''); }} title="Marquer en litige">
                           <Scale className="h-3.5 w-3.5" />
                         </Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => archiveFacture(f, true)}>
-                          <Archive className="h-3.5 w-3.5" />
+                        <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => perteFacture(f, true)} title="Passer en perte">
+                          <XOctagon className="h-3.5 w-3.5" />
                         </Button>
                       </>
                     )}
@@ -343,7 +344,7 @@ export default function ClientDetail() {
               ))}
             </tbody>
           </table>
-          {invoices.length === 0 && <p className="text-center text-muted-foreground py-4">{showArchived ? 'Aucune facture archivée.' : 'Aucune facture en cours.'}</p>}
+          {invoices.length === 0 && <p className="text-center text-muted-foreground py-4">{showPertes ? 'Aucune facture en perte.' : 'Aucune facture en cours.'}</p>}
         </CardContent>
       </Card>
 
