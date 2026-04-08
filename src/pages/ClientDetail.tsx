@@ -229,7 +229,7 @@ export default function ClientDetail() {
     if (!client || !manualDate || !manualNotes.trim()) return;
     setSavingManual(true);
     const isScheduled = manualMode === 'scheduled';
-    await supabase.from('actions_relance').insert({
+    const { error } = await supabase.from('actions_relance').insert({
       client_id: client.id,
       facture_id: manualFactureId !== 'none' ? manualFactureId : null,
       type_action: manualType,
@@ -238,8 +238,12 @@ export default function ClientDetail() {
       statut: isScheduled ? 'a_faire' : 'fait',
       notes: manualNotes.trim(),
     });
-    const { data } = await supabase.from('actions_relance').select('*, factures(numero_facture)').eq('client_id', id).order('date_prevue', { ascending: false });
-    setActions((data || []) as unknown as Action[]);
+    if (error) {
+      toast.error('Erreur lors de la sauvegarde de l\'action');
+      setSavingManual(false);
+      return;
+    }
+    await reloadActions();
     toast.success(isScheduled ? `Action programmée pour le ${manualDate}` : 'Action ajoutée à l\'historique');
     setManualActionModal(false);
     setManualMode('past');
