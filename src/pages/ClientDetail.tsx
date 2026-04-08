@@ -90,12 +90,20 @@ export default function ClientDetail() {
     if (!id) return;
     const load = async () => {
       const maxMois = await getMaxMoisExtraction();
-      let facturesQuery = supabase.from('factures').select('*').eq('client_id', id).in('statut', ['en_cours', 'perte', 'litige', 'retention_dgd']);
+      // Factures actives (FACT/NDEB) + règlements/avoirs (REC/NCRE tous statuts pour affichage)
+      let facturesQuery = supabase.from('factures').select('*').eq('client_id', id)
+        .in('statut', ['en_cours', 'perte', 'litige', 'retention_dgd'])
+        .in('type_document', ['FACT', 'NDEB']);
       if (maxMois) facturesQuery = facturesQuery.eq('mois_extraction', maxMois);
 
-      const [cRes, fRes, aRes] = await Promise.all([
+      let mouvementsQuery = supabase.from('factures').select('*').eq('client_id', id)
+        .in('type_document', ['REC', 'NCRE']);
+      if (maxMois) mouvementsQuery = mouvementsQuery.eq('mois_extraction', maxMois);
+
+      const [cRes, fRes, mRes, aRes] = await Promise.all([
         supabase.from('clients').select('*').eq('id', id).single(),
         facturesQuery,
+        mouvementsQuery,
         supabase.from('actions_relance').select('*, factures(numero_facture)').eq('client_id', id).order('date_prevue', { ascending: false }),
       ]);
 
@@ -109,7 +117,10 @@ export default function ClientDetail() {
         setClientInterne(c.client_interne);
       }
 
-      const loadedFactures = (fRes.data || []) as unknown as Facture[];
+      const loadedFactures = [
+        ...((fRes.data || []) as unknown as Facture[]),
+        ...((mRes.data || []) as unknown as Facture[]),
+      ];
       setAllFactures(loadedFactures);
       setActions((aRes.data || []) as unknown as Action[]);
     };
