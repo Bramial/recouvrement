@@ -90,20 +90,13 @@ export default function ClientDetail() {
     if (!id) return;
     const load = async () => {
       const maxMois = await getMaxMoisExtraction();
-      // Factures actives (FACT/NDEB) + règlements/avoirs (REC/NCRE tous statuts pour affichage)
-      let facturesQuery = supabase.from('factures').select('*').eq('client_id', id)
-        .in('statut', ['en_cours', 'perte', 'litige', 'retention_dgd'])
-        .in('type_document', ['FACT', 'NDEB']);
+      // Charger TOUTES les factures du client (tous types, tous statuts)
+      let facturesQuery = supabase.from('factures').select('*').eq('client_id', id);
       if (maxMois) facturesQuery = facturesQuery.eq('mois_extraction', maxMois);
 
-      let mouvementsQuery = supabase.from('factures').select('*').eq('client_id', id)
-        .in('type_document', ['REC', 'NCRE']);
-      if (maxMois) mouvementsQuery = mouvementsQuery.eq('mois_extraction', maxMois);
-
-      const [cRes, fRes, mRes, aRes] = await Promise.all([
+      const [cRes, fRes, aRes] = await Promise.all([
         supabase.from('clients').select('*').eq('id', id).single(),
         facturesQuery,
-        mouvementsQuery,
         supabase.from('actions_relance').select('*, factures(numero_facture)').eq('client_id', id).order('date_prevue', { ascending: false }),
       ]);
 
@@ -117,11 +110,7 @@ export default function ClientDetail() {
         setClientInterne(c.client_interne);
       }
 
-      const loadedFactures = [
-        ...((fRes.data || []) as unknown as Facture[]),
-        ...((mRes.data || []) as unknown as Facture[]),
-      ];
-      setAllFactures(loadedFactures);
+      setAllFactures((fRes.data || []) as unknown as Facture[]);
       setActions((aRes.data || []) as unknown as Action[]);
     };
     load();
@@ -129,10 +118,11 @@ export default function ClientDetail() {
 
   const activeFactures = allFactures.filter(f => showPertes ? f.statut === 'perte' : (f.statut === 'en_cours' || f.statut === 'litige' || f.statut === 'retention_dgd'));
   const invoices = activeFactures.filter(f => f.type_document === 'FACT' || f.type_document === 'NDEB');
-  // Mouvements REC/NCRE : afficher tous les statuts (y compris payee après absorption)
-  const movements = allFactures.filter(f => f.type_document === 'REC' || f.type_document === 'NCRE');
   const totalResteDu = invoices.reduce((s, f) => s + Number(f.solde_restant ?? f.montant ?? 0), 0);
   const pertesCount = allFactures.filter(f => f.statut === 'perte').length;
+  // Historique complet : tous les documents triés par date décroissante
+  const historique = [...allFactures].sort((a, b) => new Date(b.date_emission).getTime() - new Date(a.date_emission).getTime());
+  const soldeNet = historique.reduce((s, f) => s + Number(f.solde_restant ?? f.montant ?? 0), 0);
 
   const perteFacture = async (facture: Facture, perte: boolean) => {
     const newStatut = perte ? 'perte' : 'en_cours';
@@ -391,36 +381,57 @@ export default function ClientDetail() {
         </CardContent>
       </Card>
 
-      {movements.length > 0 && (
+      {historique.length > 0 && (
         <Collapsible open={movementsOpen} onOpenChange={setMovementsOpen}>
           <Card>
             <CollapsibleTrigger asChild>
               <CardHeader className="cursor-pointer hover:bg-muted/30">
                 <CardTitle className="text-base flex items-center gap-2 text-muted-foreground">
                   {movementsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                  Mouvements financiers ({movements.length})
+                  Historique factures & règlements ({historique.length})
                 </CardTitle>
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="p-0 overflow-x-auto">
-                <table className="w-full text-sm text-muted-foreground">
+                <table className="w-full text-sm">
                   <thead><tr className="border-b bg-muted/30">
                     <th className="text-left p-3">N°</th>
                     <th className="text-left p-3">Type</th>
                     <th className="text-right p-3">Montant</th>
+                    <th className="text-right p-3">Solde restant</th>
                     <th className="text-left p-3">Date</th>
                   </tr></thead>
                   <tbody>
-                    {movements.map(f => (
-                      <tr key={f.id} className="border-b">
-                        <td className="p-3">{f.numero_facture}</td>
-                        <td className="p-3"><Badge variant="outline" className="text-xs">{f.type_document}</Badge></td>
-                        <td className="p-3 text-right">{formatCurrency(f.solde_restant ?? f.montant)}</td>
-                        <td className="p-3">{f.date_emission}</td>
-                      </tr>
-                    ))}
+                    {historique.map(f => {
+                      const typeBadge: Record<string, { label: string; className: string }> = {
+                        FACT: { label: 'Facture', className: 'bg-blue-100 text-blue-700 border-blue-200' },
+                        NDEB: { label: 'Note de débit', className: 'bg-blue-100 text-blue-700 border-blue-200' },
+                        REC: { label: 'Règlement', className: 'bg-green-100 text-green-700 border-green-200' },
+                        NCRE: { label: 'Avoir', className: 'bg-orange-100 text-orange-700 border-orange-200' },
+                      };
+                      const badge = typeBadge[f.type_document] || { label: f.type_document, className: '' };
+                      const solde = Number(f.solde_restant ?? f.montant ?? 0);
+                      return (
+                        <tr key={f.id} className="border-b">
+                          <td className="p-3">{f.numero_facture}</td>
+                          <td className="p-3"><Badge variant="outline" className={`text-xs ${badge.className}`}>{badge.label}</Badge></td>
+                          <td className="p-3 text-right text-muted-foreground">{formatCurrency(f.montant)}</td>
+                          <td className={`p-3 text-right font-medium ${solde === 0 ? 'text-green-600' : solde < 0 ? 'text-green-600' : ''}`}>{formatCurrency(solde)}</td>
+                          <td className="p-3 text-muted-foreground">{f.date_emission}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 bg-muted/30 font-semibold">
+                      <td className="p-3" colSpan={3}>Solde net</td>
+                      <td className={`p-3 text-right ${soldeNet <= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {soldeNet <= 0 ? `${formatCurrency(soldeNet)} — Soldé` : formatCurrency(soldeNet)}
+                      </td>
+                      <td className="p-3"></td>
+                    </tr>
+                  </tfoot>
                 </table>
               </CardContent>
             </CollapsibleContent>
