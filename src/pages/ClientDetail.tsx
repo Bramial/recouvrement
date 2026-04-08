@@ -122,7 +122,10 @@ export default function ClientDetail() {
   const pertesCount = allFactures.filter(f => f.statut === 'perte').length;
   // Historique complet : tous les documents triés par date décroissante
   const historique = [...allFactures].sort((a, b) => new Date(b.date_emission).getTime() - new Date(a.date_emission).getTime());
-  const soldeNet = historique.reduce((s, f) => s + Number(f.solde_restant ?? f.montant ?? 0), 0);
+  // Solde net = somme des solde_restant des FACT/NDEB uniquement (les REC/NCRE sont déjà absorbés dans ces soldes)
+  const soldeNet = allFactures
+    .filter(f => f.type_document === 'FACT' || f.type_document === 'NDEB')
+    .reduce((s, f) => s + Number(f.solde_restant ?? f.montant ?? 0), 0);
 
   const perteFacture = async (facture: Facture, perte: boolean) => {
     const newStatut = perte ? 'perte' : 'en_cours';
@@ -411,13 +414,16 @@ export default function ClientDetail() {
                         NCRE: { label: 'Avoir', className: 'bg-orange-100 text-orange-700 border-orange-200' },
                       };
                       const badge = typeBadge[f.type_document] || { label: f.type_document, className: '' };
+                      const isInvoice = f.type_document === 'FACT' || f.type_document === 'NDEB';
                       const solde = Number(f.solde_restant ?? f.montant ?? 0);
                       return (
                         <tr key={f.id} className="border-b">
                           <td className="p-3">{f.numero_facture}</td>
                           <td className="p-3"><Badge variant="outline" className={`text-xs ${badge.className}`}>{badge.label}</Badge></td>
                           <td className="p-3 text-right text-muted-foreground">{formatCurrency(f.montant)}</td>
-                          <td className={`p-3 text-right font-medium ${solde === 0 ? 'text-green-600' : solde < 0 ? 'text-green-600' : ''}`}>{formatCurrency(solde)}</td>
+                          <td className={`p-3 text-right font-medium ${isInvoice ? (solde === 0 ? 'text-green-600' : '') : 'text-muted-foreground'}`}>
+                            {isInvoice ? formatCurrency(solde) : '—'}
+                          </td>
                           <td className="p-3 text-muted-foreground">{f.date_emission}</td>
                         </tr>
                       );
