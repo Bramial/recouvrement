@@ -9,7 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { ArrowLeft, Save, Archive, RotateCcw, ChevronDown, ChevronRight, Undo2, Scale, ShieldCheck } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ArrowLeft, Save, Archive, RotateCcw, ChevronDown, ChevronRight, Undo2, Scale, ShieldCheck, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Client {
@@ -33,7 +34,22 @@ const TYPE_ACTION_META: Record<string, { label: string; icon: string }> = {
   appel_j15: { label: 'Appel J+15', icon: '📞' },
   mise_en_demeure_j30: { label: 'Mise en demeure', icon: '📄' },
   rappel_dgd: { label: 'Rappel DGD', icon: '🛡️' },
+  appel_manuel: { label: 'Appel', icon: '📞' },
+  email_manuel: { label: 'Email', icon: '📧' },
+  relance_manuel: { label: 'Relance', icon: '🔔' },
+  courrier_manuel: { label: 'Courrier', icon: '✉️' },
+  mise_en_demeure_manuel: { label: 'Mise en demeure', icon: '📄' },
+  autre_manuel: { label: 'Autre', icon: '📋' },
 };
+
+const MANUAL_ACTION_TYPES = [
+  { value: 'appel_manuel', label: 'Appel téléphonique' },
+  { value: 'email_manuel', label: 'Email envoyé' },
+  { value: 'relance_manuel', label: 'Relance' },
+  { value: 'courrier_manuel', label: 'Courrier envoyé' },
+  { value: 'mise_en_demeure_manuel', label: 'Mise en demeure' },
+  { value: 'autre_manuel', label: 'Autre' },
+];
 const STATUT_META: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' | 'destructive' }> = {
   a_faire: { label: 'À faire', variant: 'secondary' },
   fait: { label: 'Fait', variant: 'default' },
@@ -61,6 +77,12 @@ export default function ClientDetail() {
   const [savingLitigeNote, setSavingLitigeNote] = useState(false);
   const [dgdModal, setDgdModal] = useState<Facture | null>(null);
   const [dgdDate, setDgdDate] = useState('');
+  const [manualActionModal, setManualActionModal] = useState(false);
+  const [manualType, setManualType] = useState('appel_manuel');
+  const [manualDate, setManualDate] = useState('');
+  const [manualNotes, setManualNotes] = useState('');
+  const [manualFactureId, setManualFactureId] = useState('none');
+  const [savingManual, setSavingManual] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -181,6 +203,29 @@ export default function ClientDetail() {
     toast.success('Action remise en attente');
     const { data } = await supabase.from('actions_relance').select('*, factures(numero_facture)').eq('client_id', id).order('date_prevue', { ascending: false });
     setActions((data || []) as unknown as Action[]);
+  };
+
+  const addManualAction = async () => {
+    if (!client || !manualDate || !manualNotes.trim()) return;
+    setSavingManual(true);
+    await supabase.from('actions_relance').insert({
+      client_id: client.id,
+      facture_id: manualFactureId !== 'none' ? manualFactureId : null,
+      type_action: manualType,
+      date_prevue: manualDate,
+      date_executee: manualDate,
+      statut: 'fait',
+      notes: manualNotes.trim(),
+    });
+    const { data } = await supabase.from('actions_relance').select('*, factures(numero_facture)').eq('client_id', id).order('date_prevue', { ascending: false });
+    setActions((data || []) as unknown as Action[]);
+    toast.success('Action ajoutée à l\'historique');
+    setManualActionModal(false);
+    setManualType('appel_manuel');
+    setManualDate('');
+    setManualNotes('');
+    setManualFactureId('none');
+    setSavingManual(false);
   };
 
   const formatCurrency = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: 0 }).format(n);
@@ -340,7 +385,14 @@ export default function ClientDetail() {
       )}
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Historique des relances ({actions.length})</CardTitle></CardHeader>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">Historique des relances ({actions.length})</CardTitle>
+            <Button size="sm" variant="outline" className="gap-1" onClick={() => { setManualActionModal(true); setManualDate(new Date().toISOString().split('T')[0]); }}>
+              <Plus className="h-3.5 w-3.5" /> Ajouter une action
+            </Button>
+          </div>
+        </CardHeader>
         <CardContent>
           {actions.length === 0 ? (
             <p className="text-sm text-muted-foreground">Aucune relance.</p>
@@ -435,6 +487,60 @@ export default function ClientDetail() {
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setLitigeDetailModal(null)}>Fermer</Button>
               <Button onClick={addLitigeNote} disabled={!newLitigeNote.trim() || savingLitigeNote}>Ajouter</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {manualActionModal && (
+        <div className="fixed inset-0 bg-foreground/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-card rounded-lg p-6 w-full max-w-md space-y-4">
+            <h3 className="font-semibold">Ajouter une action passée</h3>
+            <p className="text-xs text-muted-foreground">
+              Tracez une action de relance effectuée avant la mise en place de l'outil.
+            </p>
+            <div className="space-y-2">
+              <Label>Type d'action</Label>
+              <Select value={manualType} onValueChange={setManualType}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {MANUAL_ACTION_TYPES.map(t => (
+                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Date de l'action</Label>
+              <Input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Facture concernée <span className="text-muted-foreground font-normal">(optionnel)</span></Label>
+              <Select value={manualFactureId} onValueChange={setManualFactureId}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Aucune (action générale)</SelectItem>
+                  {allFactures.filter(f => f.type_document === 'FACT').map(f => (
+                    <SelectItem key={f.id} value={f.id}>{f.numero_facture} — {formatCurrency(f.solde_restant ?? f.montant)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Description / Notes</Label>
+              <textarea
+                className="w-full border rounded-md p-3 text-sm min-h-[80px] bg-background"
+                placeholder="Ex: Appel au client, laissé un message vocal concernant les factures impayées..."
+                value={manualNotes}
+                onChange={(e) => setManualNotes(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setManualActionModal(false)}>Annuler</Button>
+              <Button onClick={addManualAction} disabled={!manualDate || !manualNotes.trim() || savingManual}>
+                Ajouter à l'historique
+              </Button>
             </div>
           </div>
         </div>
