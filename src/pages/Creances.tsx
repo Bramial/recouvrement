@@ -25,7 +25,7 @@ interface Facture {
   statut: string;
   source: string | null;
   date_reception_dgd: string | null;
-  clients: { nom: string; code_client: string; exclusion_relance: boolean } | null;
+  clients: { nom: string; code_client: string; exclusion_relance: boolean; client_interne: boolean } | null;
 }
 
 interface ActionRelance {
@@ -89,7 +89,7 @@ export default function Creances() {
     const load = async () => {
       const maxMois = await getMaxMoisExtraction();
       const joinType = country !== 'all' ? 'clients!inner' : 'clients';
-      let query = supabase.from('factures').select(`*, ${joinType}(nom, code_client, exclusion_relance)`).in('statut', ['en_cours', 'litige', 'retention_dgd']);
+      let query = supabase.from('factures').select(`*, ${joinType}(nom, code_client, exclusion_relance, client_interne)`).in('statut', ['en_cours', 'litige', 'retention_dgd']);
       if (maxMois) query = query.eq('mois_extraction', maxMois);
       if (country !== 'all') query = query.ilike('clients.code_client', `${country}_%`);
       query = query.order('date_echeance', { ascending: true });
@@ -102,6 +102,8 @@ export default function Creances() {
 
   const { filtered, totalAlgebrique } = useMemo(() => {
     let res = factures;
+    // Exclure les clients internes
+    res = res.filter(f => !f.clients?.client_interne);
     // Filter by statut view mode
     if (showLitiges) {
       res = res.filter(f => f.statut === 'litige');

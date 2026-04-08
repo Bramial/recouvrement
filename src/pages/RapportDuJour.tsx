@@ -26,7 +26,7 @@ interface Action {
   contenu_email: string | null;
   notes: string | null;
   factures: { numero_facture: string; montant: number; date_echeance: string; solde_restant: number | null; statut: string } | null;
-  clients: { nom: string; email: string | null; telephone: string | null; code_client: string } | null;
+  clients: { nom: string; email: string | null; telephone: string | null; code_client: string; client_interne: boolean } | null;
 }
 
 interface Rapport {
@@ -115,7 +115,7 @@ export default function RapportDuJour() {
     setLoading(true);
     const clientsJoin = country !== 'all' ? 'clients!inner' : 'clients';
     let actionsQuery = supabase.from('actions_relance')
-      .select(`*, factures(numero_facture, montant, date_echeance, solde_restant, statut), ${clientsJoin}(nom, email, telephone, code_client)`)
+      .select(`*, factures(numero_facture, montant, date_echeance, solde_restant, statut), ${clientsJoin}(nom, email, telephone, code_client, client_interne)`)
       .eq('statut', 'a_faire').lte('date_prevue', today);
     if (country !== 'all') actionsQuery = actionsQuery.ilike('clients.code_client', `${country}_%`);
 
@@ -127,9 +127,9 @@ export default function RapportDuJour() {
       actionsQuery,
     ]);
     setRapport(rapportRes.data as Rapport | null);
-    // Filter out actions linked to archived invoices
+    // Filter out actions for internal clients, perte and litige invoices
     const allActions = ((actionsRes.data || []) as unknown as Action[])
-      .filter(a => a.factures?.statut !== 'perte' && a.factures?.statut !== 'litige')
+      .filter(a => !a.clients?.client_interne && a.factures?.statut !== 'perte' && a.factures?.statut !== 'litige')
       .sort((a, b) => (TYPE_ACTION_ORDER[a.type_action] ?? 9) - (TYPE_ACTION_ORDER[b.type_action] ?? 9));
     setActions(allActions);
 
@@ -142,14 +142,14 @@ export default function RapportDuJour() {
 
       // Current month: factures en_cours for total créances + répartition FR/PT
       let currentQuery = supabase.from('factures')
-        .select('solde_restant, source, client_id, clients(code_client)')
+        .select('solde_restant, source, client_id, clients(code_client, client_interne)')
         .eq('mois_extraction', maxMois)
         .in('statut', ['en_cours', 'retention_dgd']);
       if (country !== 'all') currentQuery = currentQuery.eq('source', country);
 
       // Previous month: total créances for comparison
       let prevQuery = supabase.from('factures')
-        .select('solde_restant')
+        .select('solde_restant, clients(client_interne)')
         .eq('mois_extraction', prevMois)
         .in('statut', ['en_cours', 'retention_dgd']);
       if (country !== 'all') prevQuery = prevQuery.eq('source', country);
@@ -192,8 +192,10 @@ export default function RapportDuJour() {
         currentQuery, prevQuery, regleesQuery, currentAllQuery, prevNumQuery, litigesQuery, litigesPrevQuery, pertesQuery, pertesPrevQuery,
       ]);
 
-      const currentData = (currentRes.data || []) as { solde_restant: number | null; source: string | null }[];
-      const prevData = (prevRes.data || []) as { solde_restant: number | null }[];
+      const currentData = ((currentRes.data || []) as { solde_restant: number | null; source: string | null; clients: { client_interne: boolean } | null }[])
+        .filter(f => !f.clients?.client_interne);
+      const prevData = ((prevRes.data || []) as { solde_restant: number | null; clients: { client_interne: boolean } | null }[])
+        .filter(f => !f.clients?.client_interne);
 
       type FactureRow = { numero_facture: string; montant: number; solde_restant: number | null; source: string | null; clients: { nom: string } | null };
       const toResume = (f: FactureRow): FactureResume => ({

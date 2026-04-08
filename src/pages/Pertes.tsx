@@ -20,7 +20,7 @@ interface FacturePerte {
   date_echeance: string;
   solde_restant: number | null;
   mois_extraction: string | null;
-  clients: { nom: string; code_client: string } | null;
+  clients: { nom: string; code_client: string; client_interne: boolean } | null;
 }
 
 function formatCurrency(n: number) {
@@ -39,7 +39,7 @@ export default function Pertes() {
       const joinType = country !== 'all' ? 'clients!inner' : 'clients';
       let query = supabase
         .from('factures')
-        .select(`id, client_id, numero_facture, type_document, montant, date_emission, date_echeance, solde_restant, mois_extraction, ${joinType}(nom, code_client)`)
+        .select(`id, client_id, numero_facture, type_document, montant, date_emission, date_echeance, solde_restant, mois_extraction, ${joinType}(nom, code_client, client_interne)`)
         .eq('statut', 'perte')
         .order('date_echeance', { ascending: false });
       if (country !== 'all') query = query.ilike('clients.code_client', `${country}_%`);
@@ -51,9 +51,12 @@ export default function Pertes() {
   }, [country]);
 
   const filtered = useMemo(() => {
-    if (!search) return factures;
-    const s = search.toLowerCase();
-    return factures.filter(f => f.clients?.nom.toLowerCase().includes(s) || f.numero_facture.toLowerCase().includes(s));
+    let res = factures.filter(f => !f.clients?.client_interne);
+    if (search) {
+      const s = search.toLowerCase();
+      res = res.filter(f => f.clients?.nom.toLowerCase().includes(s) || f.numero_facture.toLowerCase().includes(s));
+    }
+    return res;
   }, [factures, search]);
 
   const restaurer = async (f: FacturePerte) => {

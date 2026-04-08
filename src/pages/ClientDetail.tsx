@@ -16,7 +16,7 @@ import { toast } from 'sonner';
 interface Client {
   id: string; code_client: string; nom: string; email: string | null;
   telephone: string | null; pays: string | null; conditions_paiement: string | null;
-  exclusion_relance: boolean;
+  exclusion_relance: boolean; client_interne: boolean;
 }
 interface Facture {
   id: string; numero_facture: string; montant: number; solde_restant: number | null;
@@ -66,6 +66,7 @@ export default function ClientDetail() {
   const [telephone, setTelephone] = useState('');
   const [conditions, setConditions] = useState('');
   const [exclusion, setExclusion] = useState(false);
+  const [clientInterne, setClientInterne] = useState(false);
   const [saving, setSaving] = useState(false);
   const [movementsOpen, setMovementsOpen] = useState(false);
   const [showPertes, setShowPertes] = useState(false);
@@ -105,6 +106,7 @@ export default function ClientDetail() {
         setTelephone(c.telephone || '');
         setConditions(c.conditions_paiement || '');
         setExclusion(c.exclusion_relance);
+        setClientInterne(c.client_interne);
       }
 
       const loadedFactures = (fRes.data || []) as unknown as Facture[];
@@ -193,7 +195,7 @@ export default function ClientDetail() {
     setSaving(true);
     await supabase.from('clients').update({
       email: email || null, telephone: telephone || null,
-      conditions_paiement: conditions || 'comptant', exclusion_relance: exclusion,
+      conditions_paiement: conditions || 'comptant', exclusion_relance: exclusion, client_interne: clientInterne,
     }).eq('id', id);
     toast.success('Client mis à jour');
     setSaving(false);
@@ -289,6 +291,10 @@ export default function ClientDetail() {
             <div className="flex items-center gap-3 pt-6">
               <Switch checked={exclusion} onCheckedChange={setExclusion} />
               <Label>Exclure des relances</Label>
+            </div>
+            <div className="flex items-center gap-3 pt-6">
+              <Switch checked={clientInterne} onCheckedChange={setClientInterne} />
+              <Label>Client interne</Label>
             </div>
           </div>
           <Button onClick={handleSave} disabled={saving}><Save className="h-4 w-4 mr-1" /> Enregistrer</Button>

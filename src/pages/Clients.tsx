@@ -23,6 +23,7 @@ interface Client {
   telephone: string | null;
   conditions_paiement: string | null;
   exclusion_relance: boolean;
+  client_interne: boolean;
   facture_count?: number;
   total_du?: number;
   total_original?: number;
@@ -212,6 +213,7 @@ export default function Clients() {
                   <td className="p-3 text-muted-foreground">{c.code_client}</td>
                   <td className="p-3 font-medium">
                     {c.nom}
+                    {c.client_interne && <Badge variant="outline" className="ml-2 text-xs text-blue-500 border-blue-200">Interne</Badge>}
                     {c.exclusion_relance && <Badge variant="outline" className="ml-2 text-xs text-muted-foreground">Exclu</Badge>}
                   </td>
                   <td className="p-3"><Badge variant="secondary">{getCountryFlag(c.code_client)} {c.code_client.startsWith('FR_') ? 'FR' : c.code_client.startsWith('PT_') ? 'PT' : '—'}</Badge></td>
