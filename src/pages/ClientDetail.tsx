@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Save, XOctagon, RotateCcw, ChevronDown, ChevronRight, Undo2, Scale, ShieldCheck, Plus } from 'lucide-react';
+import { ArrowLeft, Save, XOctagon, RotateCcw, ChevronDown, ChevronRight, Undo2, Scale, ShieldCheck, Plus, CheckCircle, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Client {
@@ -199,12 +199,30 @@ export default function ClientDetail() {
     setSaving(false);
   };
 
+  const reloadActions = async () => {
+    const { data } = await supabase.from('actions_relance').select('*, factures(numero_facture)').eq('client_id', id).order('date_prevue', { ascending: false });
+    setActions((data || []) as unknown as Action[]);
+  };
+
   const reopenAction = async (actionId: string) => {
     if (!confirm('Remettre cette action en attente ?')) return;
     await supabase.from('actions_relance').update({ statut: 'a_faire', date_executee: null }).eq('id', actionId);
     toast.success('Action remise en attente');
-    const { data } = await supabase.from('actions_relance').select('*, factures(numero_facture)').eq('client_id', id).order('date_prevue', { ascending: false });
-    setActions((data || []) as unknown as Action[]);
+    reloadActions();
+  };
+
+  const markActionDone = async (actionId: string) => {
+    const today = new Date().toISOString().split('T')[0];
+    await supabase.from('actions_relance').update({ statut: 'fait', date_executee: today }).eq('id', actionId);
+    toast.success('Action marquée comme faite');
+    reloadActions();
+  };
+
+  const ignoreAction = async (actionId: string) => {
+    if (!confirm('Ignorer cette action ?')) return;
+    await supabase.from('actions_relance').update({ statut: 'ignore' }).eq('id', actionId);
+    toast.success('Action ignorée');
+    reloadActions();
   };
 
   const addManualAction = async () => {
@@ -418,7 +436,22 @@ export default function ClientDetail() {
                           <span className="text-xs text-muted-foreground">{displayDate}</span>
                           <span className="font-medium text-sm">{meta.label}</span>
                           <Badge variant={statut.variant}>{statut.label}</Badge>
+                          {a.statut === 'a_faire' && (
+                            <>
+                              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs gap-1" onClick={() => markActionDone(a.id)}>
+                                <CheckCircle className="h-3 w-3" /> Fait
+                              </Button>
+                              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs gap-1 text-muted-foreground" onClick={() => ignoreAction(a.id)}>
+                                <X className="h-3 w-3" /> Ignorer
+                              </Button>
+                            </>
+                          )}
                           {a.statut === 'fait' && (
+                            <Button size="sm" variant="ghost" className="h-6 px-2 text-xs gap-1" onClick={() => reopenAction(a.id)}>
+                              <Undo2 className="h-3 w-3" /> Réouvrir
+                            </Button>
+                          )}
+                          {a.statut === 'ignore' && (
                             <Button size="sm" variant="ghost" className="h-6 px-2 text-xs gap-1" onClick={() => reopenAction(a.id)}>
                               <Undo2 className="h-3 w-3" /> Réouvrir
                             </Button>

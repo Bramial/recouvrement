@@ -180,12 +180,12 @@ export default function RapportDuJour() {
         .select('solde_restant').eq('mois_extraction', prevMois).eq('statut', 'litige');
       if (country !== 'all') litigesPrevQuery = litigesPrevQuery.eq('source', country);
 
-      // Pertes current & previous
+      // Pertes current & previous (inclut 'perte' manuelle + 'pertes_profits' importé)
       let pertesQuery = supabase.from('factures')
-        .select('solde_restant').eq('mois_extraction', maxMois).eq('statut', 'pertes_profits');
+        .select('solde_restant').eq('mois_extraction', maxMois).in('statut', ['perte', 'pertes_profits']);
       if (country !== 'all') pertesQuery = pertesQuery.eq('source', country);
       let pertesPrevQuery = supabase.from('factures')
-        .select('solde_restant').eq('mois_extraction', prevMois).eq('statut', 'pertes_profits');
+        .select('solde_restant').eq('mois_extraction', prevMois).in('statut', ['perte', 'pertes_profits']);
       if (country !== 'all') pertesPrevQuery = pertesPrevQuery.eq('source', country);
 
       const [currentRes, prevRes, regleesRes, currentAllRes, prevNumRes, litigesRes, litigesPrevRes, pertesRes, pertesPrevRes] = await Promise.all([
