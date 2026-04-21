@@ -135,10 +135,21 @@ export default function RapportDuJour() {
 
     // Fetch extra KPIs from factures
     if (maxMois) {
-      // Compute previous month from mois_extraction (format "YYYY-MM")
+      // Compute previous month from mois_extraction (format "YYYY-MM-DD" or "YYYY-MM")
       const [y, m] = maxMois.split('-').map(Number);
       const prevDate = new Date(y, m - 2, 1); // m-1 is current (0-indexed), m-2 is previous
-      const prevMois = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+      const prevMois = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}-01`;
+
+      // Latest apparition date across all factures — used to detect invoices that
+      // disappeared from the most recent pendentes import (= newly paid).
+      const { data: latestAppRow } = await supabase
+        .from('factures')
+        .select('derniere_apparition')
+        .not('derniere_apparition', 'is', null)
+        .order('derniere_apparition', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const latestApparition = latestAppRow?.derniere_apparition as string | undefined;
 
       // Current month: factures en_cours for total créances + répartition FR/PT (FACT/NDEB only, soldes recalculés)
       let currentQuery = supabase.from('factures')
@@ -156,11 +167,13 @@ export default function RapportDuJour() {
         .in('type_document', ['FACT', 'NDEB']);
       if (country !== 'all') prevQuery = prevQuery.eq('source', country);
 
-      // Factures réglées: payee in previous extraction (detected paid between prev and current)
+      // Factures réglées: payee + disparue du dernier import (derniere_apparition < latest).
+      // FACT/NDEB only — REC/NCRE are absorption artifacts, not real invoice payments.
       let regleesQuery = supabase.from('factures')
-        .select('numero_facture, montant, solde_restant, source, clients(nom)')
-        .eq('mois_extraction', prevMois)
-        .eq('statut', 'payee');
+        .select('numero_facture, montant, solde_restant, source, clients(nom, client_interne)')
+        .eq('statut', 'payee')
+        .in('type_document', ['FACT', 'NDEB']);
+      if (latestApparition) regleesQuery = regleesQuery.lt('derniere_apparition', latestApparition);
       if (country !== 'all') regleesQuery = regleesQuery.eq('source', country);
 
       // All factures in current month (to find nouvelles by comparing with prev)
@@ -199,7 +212,7 @@ export default function RapportDuJour() {
       const prevData = ((prevRes.data || []) as { solde_restant: number | null; clients: { client_interne: boolean } | null }[])
         .filter(f => !f.clients?.client_interne);
 
-      type FactureRow = { numero_facture: string; montant: number; solde_restant: number | null; source: string | null; clients: { nom: string } | null };
+      type FactureRow = { numero_facture: string; montant: number; solde_restant: number | null; source: string | null; clients: { nom: string; client_interne?: boolean } | null };
       const toResume = (f: FactureRow): FactureResume => ({
         numero_facture: f.numero_facture,
         montant: f.montant,
@@ -208,7 +221,9 @@ export default function RapportDuJour() {
         client_nom: f.clients?.nom || '—',
       });
 
-      const facturesReglees = ((regleesRes.data || []) as FactureRow[]).map(toResume);
+      const facturesReglees = ((regleesRes.data || []) as FactureRow[])
+        .filter(f => !f.clients?.client_interne)
+        .map(toResume);
 
       // Compute nouvelles factures by comparing numero_facture sets
       const prevNumeros = new Set((prevNumRes.data || []).map((f: { numero_facture: string }) => f.numero_facture));

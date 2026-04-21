@@ -15,7 +15,8 @@ interface FacturePayee {
   montant: number;
   date_emission: string;
   mois_extraction: string | null;
-  clients: { nom: string; code_client: string } | null;
+  derniere_apparition: string | null;
+  clients: { nom: string; code_client: string; client_interne: boolean } | null;
 }
 
 function formatCurrency(n: number) {
@@ -34,12 +35,14 @@ export default function FacturesReglees() {
       const joinType = country !== 'all' ? 'clients!inner' : 'clients';
       let query = supabase
         .from('factures')
-        .select(`id, client_id, numero_facture, montant, date_emission, mois_extraction, ${joinType}(nom, code_client)`)
+        .select(`id, client_id, numero_facture, montant, date_emission, mois_extraction, derniere_apparition, ${joinType}(nom, code_client, client_interne)`)
         .eq('statut', 'payee')
-        .order('mois_extraction', { ascending: false });
+        .order('derniere_apparition', { ascending: false, nullsFirst: false });
       if (country !== 'all') query = query.ilike('clients.code_client', `${country}_%`);
       const { data } = await query;
-      setFactures((data || []) as unknown as FacturePayee[]);
+      const rows = ((data || []) as unknown as FacturePayee[])
+        .filter(f => !f.clients?.client_interne);
+      setFactures(rows);
       setLoading(false);
     };
     load();
