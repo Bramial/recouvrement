@@ -22,7 +22,12 @@ interface Facture {
   id: string; numero_facture: string; montant: number; solde_restant: number | null;
   date_echeance: string; date_emission: string; statut: string; type_document: string;
   notes_litige: string | null; date_reception_dgd: string | null;
+  derniere_apparition: string | null; updated_at: string | null;
 }
+
+type HistoryRow =
+  | { kind: 'doc'; facture: Facture; sortDate: string }
+  | { kind: 'payment_detected'; facture: Facture; sortDate: string; detectedAt: string };
 interface Action {
   id: string; type_action: string; date_prevue: string; date_executee: string | null;
   statut: string; notes: string | null;
@@ -120,8 +125,19 @@ export default function ClientDetail() {
   const invoices = activeFactures.filter(f => f.type_document === 'FACT' || f.type_document === 'NDEB');
   const totalResteDu = invoices.reduce((s, f) => s + Number(f.solde_restant ?? f.montant ?? 0), 0);
   const pertesCount = allFactures.filter(f => f.statut === 'perte').length;
-  // Historique complet : tous les documents triés par date décroissante
-  const historique = [...allFactures].sort((a, b) => new Date(b.date_emission).getTime() - new Date(a.date_emission).getTime());
+  // Historique complet : documents + lignes virtuelles "Paiement détecté" pour les
+  // FACT/NDEB passées en payee (système infère le paiement via disparition des pendentes).
+  const historique: HistoryRow[] = (() => {
+    const rows: HistoryRow[] = allFactures.map(f => ({ kind: 'doc' as const, facture: f, sortDate: f.date_emission }));
+    for (const f of allFactures) {
+      const isInvoice = f.type_document === 'FACT' || f.type_document === 'NDEB';
+      if (!isInvoice || f.statut !== 'payee') continue;
+      const detectedAt = f.derniere_apparition || (f.updated_at ? f.updated_at.slice(0, 10) : null);
+      if (!detectedAt) continue;
+      rows.push({ kind: 'payment_detected', facture: f, sortDate: detectedAt, detectedAt });
+    }
+    return rows.sort((a, b) => new Date(b.sortDate).getTime() - new Date(a.sortDate).getTime());
+  })();
   // Solde net = somme des solde_restant des FACT/NDEB uniquement (les REC/NCRE sont déjà absorbés dans ces soldes)
   const soldeNet = allFactures
     .filter(f => f.type_document === 'FACT' || f.type_document === 'NDEB')
@@ -406,7 +422,24 @@ export default function ClientDetail() {
                     <th className="text-left p-3">Date</th>
                   </tr></thead>
                   <tbody>
-                    {historique.map(f => {
+                    {historique.map(row => {
+                      if (row.kind === 'payment_detected') {
+                        const f = row.facture;
+                        return (
+                          <tr key={`pay-${f.id}`} className="border-b bg-green-50/40">
+                            <td className="p-3 text-muted-foreground italic">— Paiement —</td>
+                            <td className="p-3">
+                              <Badge variant="outline" className="text-xs bg-green-100 text-green-700 border-green-200">
+                                Paiement détecté
+                              </Badge>
+                            </td>
+                            <td className="p-3 text-right text-green-700">-{formatCurrency(f.montant)}</td>
+                            <td className="p-3 text-right text-muted-foreground">—</td>
+                            <td className="p-3 text-muted-foreground" title={`Disparition de ${f.numero_facture} des pendentes`}>{row.detectedAt}</td>
+                          </tr>
+                        );
+                      }
+                      const f = row.facture;
                       const typeBadge: Record<string, { label: string; className: string }> = {
                         FACT: { label: 'Facture', className: 'bg-blue-100 text-blue-700 border-blue-200' },
                         NDEB: { label: 'Note de débit', className: 'bg-blue-100 text-blue-700 border-blue-200' },

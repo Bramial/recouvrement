@@ -53,6 +53,7 @@ interface KpiExtras {
   totalPT: number;
   facturesReglees: FactureResume[];
   nouvellesFactures: FactureResume[];
+  reglementsRecus: FactureResume[];
   totalLitiges: number;
   totalLitigesPrev: number;
   nbLitiges: number;
@@ -107,6 +108,7 @@ export default function RapportDuJour() {
   const [ignoreNote, setIgnoreNote] = useState('');
   const [showRegleesModal, setShowRegleesModal] = useState(false);
   const [showNouvellesModal, setShowNouvellesModal] = useState(false);
+  const [showReglementsModal, setShowReglementsModal] = useState(false);
   const { country } = useCountryFilter();
 
   const today = format(new Date(), 'yyyy-MM-dd');
@@ -176,16 +178,19 @@ export default function RapportDuJour() {
       if (latestApparition) regleesQuery = regleesQuery.lt('derniere_apparition', latestApparition);
       if (country !== 'all') regleesQuery = regleesQuery.eq('source', country);
 
-      // All factures in current month (to find nouvelles by comparing with prev)
-      let currentAllQuery = supabase.from('factures')
-        .select('numero_facture, montant, solde_restant, source, clients(nom)')
-        .eq('mois_extraction', maxMois);
-      if (country !== 'all') currentAllQuery = currentAllQuery.eq('source', country);
+      // Nouvelles factures: FACT/NDEB apparues pour la 1ère fois au dernier import
+      let nouvellesQuery = supabase.from('factures')
+        .select('numero_facture, montant, solde_restant, source, clients(nom, client_interne)')
+        .in('type_document', ['FACT', 'NDEB']);
+      if (latestApparition) nouvellesQuery = nouvellesQuery.eq('premiere_apparition', latestApparition);
+      if (country !== 'all') nouvellesQuery = nouvellesQuery.eq('source', country);
 
-      let prevNumQuery = supabase.from('factures')
-        .select('numero_facture')
-        .eq('mois_extraction', prevMois);
-      if (country !== 'all') prevNumQuery = prevNumQuery.eq('source', country);
+      // Règlements reçus: REC/NCRE apparus pour la 1ère fois au dernier import (crédits non encore imputés)
+      let reglementsQuery = supabase.from('factures')
+        .select('numero_facture, montant, solde_restant, source, clients(nom, client_interne)')
+        .in('type_document', ['REC', 'NCRE']);
+      if (latestApparition) reglementsQuery = reglementsQuery.eq('premiere_apparition', latestApparition);
+      if (country !== 'all') reglementsQuery = reglementsQuery.eq('source', country);
 
       // Litiges current & previous
       let litigesQuery = supabase.from('factures')
@@ -203,8 +208,8 @@ export default function RapportDuJour() {
         .select('solde_restant').eq('mois_extraction', prevMois).in('statut', ['perte', 'pertes_profits']);
       if (country !== 'all') pertesPrevQuery = pertesPrevQuery.eq('source', country);
 
-      const [currentRes, prevRes, regleesRes, currentAllRes, prevNumRes, litigesRes, litigesPrevRes, pertesRes, pertesPrevRes] = await Promise.all([
-        currentQuery, prevQuery, regleesQuery, currentAllQuery, prevNumQuery, litigesQuery, litigesPrevQuery, pertesQuery, pertesPrevQuery,
+      const [currentRes, prevRes, regleesRes, nouvellesRes, reglementsRes, litigesRes, litigesPrevRes, pertesRes, pertesPrevRes] = await Promise.all([
+        currentQuery, prevQuery, regleesQuery, nouvellesQuery, reglementsQuery, litigesQuery, litigesPrevQuery, pertesQuery, pertesPrevQuery,
       ]);
 
       const currentData = ((currentRes.data || []) as { solde_restant: number | null; source: string | null; clients: { client_interne: boolean } | null }[])
@@ -225,10 +230,12 @@ export default function RapportDuJour() {
         .filter(f => !f.clients?.client_interne)
         .map(toResume);
 
-      // Compute nouvelles factures by comparing numero_facture sets
-      const prevNumeros = new Set((prevNumRes.data || []).map((f: { numero_facture: string }) => f.numero_facture));
-      const nouvellesFactures = ((currentAllRes.data || []) as FactureRow[])
-        .filter(f => !prevNumeros.has(f.numero_facture))
+      const nouvellesFactures = ((nouvellesRes.data || []) as FactureRow[])
+        .filter(f => !f.clients?.client_interne)
+        .map(toResume);
+
+      const reglementsRecus = ((reglementsRes.data || []) as FactureRow[])
+        .filter(f => !f.clients?.client_interne)
         .map(toResume);
 
       const totalCreances = currentData.reduce((sum, f) => sum + (f.solde_restant || 0), 0);
@@ -248,6 +255,7 @@ export default function RapportDuJour() {
         totalPT,
         facturesReglees,
         nouvellesFactures,
+        reglementsRecus,
         totalLitiges: litigesData.reduce((s, f) => s + (f.solde_restant || 0), 0),
         totalLitigesPrev: litigesPrevData.reduce((s, f) => s + (f.solde_restant || 0), 0),
         nbLitiges: litigesData.length,
@@ -336,6 +344,13 @@ export default function RapportDuJour() {
           value={String(kpiExtras?.nouvellesFactures.length ?? 0)}
           icon={FileText}
           onClick={() => setShowNouvellesModal(true)}
+        />
+        <KPICard
+          title="Règlements reçus"
+          value={String(kpiExtras?.reglementsRecus.length ?? 0)}
+          icon={Receipt}
+          variant="success"
+          onClick={() => setShowReglementsModal(true)}
         />
         <KPICard
           title="Litiges en cours"
@@ -508,6 +523,31 @@ export default function RapportDuJour() {
                     <p className="text-xs text-muted-foreground">#{f.numero_facture} · {f.source}</p>
                   </div>
                   <p className="text-sm font-semibold whitespace-nowrap">{formatCurrency(f.solde_restant ?? f.montant)}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showReglementsModal && kpiExtras && (
+        <div className="fixed inset-0 bg-foreground/50 flex items-center justify-center z-50 p-4" onClick={() => setShowReglementsModal(false)}>
+          <div className="bg-card rounded-lg p-6 w-full max-w-lg max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold">Règlements reçus ({kpiExtras.reglementsRecus.length})</h3>
+              <Button size="sm" variant="ghost" onClick={() => setShowReglementsModal(false)}><X className="h-4 w-4" /></Button>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">REC/NCRE apparus au dernier import — crédits non encore imputés.</p>
+            <div className="overflow-y-auto space-y-2">
+              {kpiExtras.reglementsRecus.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4">Aucun règlement reçu au dernier import.</p>
+              ) : kpiExtras.reglementsRecus.map((f) => (
+                <div key={f.numero_facture} className="border rounded-md p-3 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{f.client_nom}</p>
+                    <p className="text-xs text-muted-foreground">#{f.numero_facture} · {f.source}</p>
+                  </div>
+                  <p className="text-sm font-semibold whitespace-nowrap">{formatCurrency(f.montant)}</p>
                 </div>
               ))}
             </div>
