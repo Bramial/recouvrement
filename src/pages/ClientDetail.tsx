@@ -126,13 +126,14 @@ export default function ClientDetail() {
   const totalResteDu = invoices.reduce((s, f) => s + Number(f.solde_restant ?? f.montant ?? 0), 0);
   const pertesCount = allFactures.filter(f => f.statut === 'perte').length;
   // Historique complet : documents + lignes virtuelles "Paiement détecté" pour les
-  // FACT/NDEB passées en payee (système infère le paiement via disparition des pendentes).
+  // FACT/NDEB passées en payee. La date affichée est updated_at (quand le système a
+  // basculé la facture en payee), pas derniere_apparition (dernière présence en pendentes).
   const historique: HistoryRow[] = (() => {
     const rows: HistoryRow[] = allFactures.map(f => ({ kind: 'doc' as const, facture: f, sortDate: f.date_emission }));
     for (const f of allFactures) {
       const isInvoice = f.type_document === 'FACT' || f.type_document === 'NDEB';
       if (!isInvoice || f.statut !== 'payee') continue;
-      const detectedAt = f.derniere_apparition || (f.updated_at ? f.updated_at.slice(0, 10) : null);
+      const detectedAt = (f.updated_at ? f.updated_at.slice(0, 10) : null) || f.derniere_apparition;
       if (!detectedAt) continue;
       rows.push({ kind: 'payment_detected', facture: f, sortDate: detectedAt, detectedAt });
     }
@@ -425,6 +426,7 @@ export default function ClientDetail() {
                     {historique.map(row => {
                       if (row.kind === 'payment_detected') {
                         const f = row.facture;
+                        const tooltip = `Facture ${f.numero_facture} passée en payée (disparue des pendentes)${f.derniere_apparition ? ` — dernière présence le ${f.derniere_apparition}` : ''}`;
                         return (
                           <tr key={`pay-${f.id}`} className="border-b bg-green-50/40">
                             <td className="p-3 text-muted-foreground italic">— Paiement —</td>
@@ -435,7 +437,7 @@ export default function ClientDetail() {
                             </td>
                             <td className="p-3 text-right text-green-700">-{formatCurrency(f.montant)}</td>
                             <td className="p-3 text-right text-muted-foreground">—</td>
-                            <td className="p-3 text-muted-foreground" title={`Disparition de ${f.numero_facture} des pendentes`}>{row.detectedAt}</td>
+                            <td className="p-3 text-muted-foreground" title={tooltip}>{row.detectedAt}</td>
                           </tr>
                         );
                       }
