@@ -49,6 +49,7 @@ interface FactureResume {
 interface KpiExtras {
   totalCreances: number;
   totalCreancesPrev: number;
+  totalEnRetard: number;
   totalFR: number;
   totalPT: number;
   facturesReglees: FactureResume[];
@@ -192,24 +193,34 @@ export default function RapportDuJour() {
       if (latestApparition) reglementsQuery = reglementsQuery.eq('premiere_apparition', latestApparition);
       if (country !== 'all') reglementsQuery = reglementsQuery.eq('source', country);
 
+      // En retard: factures en cours avec échéance dépassée (pour recalculer côté client, sans internes)
+      const today = format(new Date(), 'yyyy-MM-dd');
+      let retardQuery = supabase.from('factures')
+        .select('solde_restant, clients(client_interne)')
+        .eq('mois_extraction', maxMois)
+        .in('statut', ['en_cours', 'retention_dgd'])
+        .in('type_document', ['FACT', 'NDEB'])
+        .lt('date_echeance', today);
+      if (country !== 'all') retardQuery = retardQuery.eq('source', country);
+
       // Litiges current & previous
       let litigesQuery = supabase.from('factures')
-        .select('solde_restant').eq('mois_extraction', maxMois).eq('statut', 'litige');
+        .select('solde_restant, clients(client_interne)').eq('mois_extraction', maxMois).eq('statut', 'litige');
       if (country !== 'all') litigesQuery = litigesQuery.eq('source', country);
       let litigesPrevQuery = supabase.from('factures')
-        .select('solde_restant').eq('mois_extraction', prevMois).eq('statut', 'litige');
+        .select('solde_restant, clients(client_interne)').eq('mois_extraction', prevMois).eq('statut', 'litige');
       if (country !== 'all') litigesPrevQuery = litigesPrevQuery.eq('source', country);
 
       // Pertes current & previous (inclut 'perte' manuelle + 'pertes_profits' importé)
       let pertesQuery = supabase.from('factures')
-        .select('solde_restant').eq('mois_extraction', maxMois).in('statut', ['perte', 'pertes_profits']);
+        .select('solde_restant, clients(client_interne)').eq('mois_extraction', maxMois).in('statut', ['perte', 'pertes_profits']);
       if (country !== 'all') pertesQuery = pertesQuery.eq('source', country);
       let pertesPrevQuery = supabase.from('factures')
-        .select('solde_restant').eq('mois_extraction', prevMois).in('statut', ['perte', 'pertes_profits']);
+        .select('solde_restant, clients(client_interne)').eq('mois_extraction', prevMois).in('statut', ['perte', 'pertes_profits']);
       if (country !== 'all') pertesPrevQuery = pertesPrevQuery.eq('source', country);
 
-      const [currentRes, prevRes, regleesRes, nouvellesRes, reglementsRes, litigesRes, litigesPrevRes, pertesRes, pertesPrevRes] = await Promise.all([
-        currentQuery, prevQuery, regleesQuery, nouvellesQuery, reglementsQuery, litigesQuery, litigesPrevQuery, pertesQuery, pertesPrevQuery,
+      const [currentRes, prevRes, regleesRes, nouvellesRes, reglementsRes, retardRes, litigesRes, litigesPrevRes, pertesRes, pertesPrevRes] = await Promise.all([
+        currentQuery, prevQuery, regleesQuery, nouvellesQuery, reglementsQuery, retardQuery, litigesQuery, litigesPrevQuery, pertesQuery, pertesPrevQuery,
       ]);
 
       const currentData = ((currentRes.data || []) as { solde_restant: number | null; source: string | null; clients: { client_interne: boolean } | null }[])
@@ -243,14 +254,19 @@ export default function RapportDuJour() {
       const totalFR = currentData.filter(f => f.source === 'FR').reduce((sum, f) => sum + (f.solde_restant || 0), 0);
       const totalPT = currentData.filter(f => f.source === 'PT').reduce((sum, f) => sum + (f.solde_restant || 0), 0);
 
-      const litigesData = (litigesRes.data || []) as { solde_restant: number | null }[];
-      const litigesPrevData = (litigesPrevRes.data || []) as { solde_restant: number | null }[];
-      const pertesData = (pertesRes.data || []) as { solde_restant: number | null }[];
-      const pertesPrevData = (pertesPrevRes.data || []) as { solde_restant: number | null }[];
+      type StatRow = { solde_restant: number | null; clients: { client_interne: boolean } | null };
+      const excludeInterne = (rows: StatRow[]) => rows.filter(r => !r.clients?.client_interne);
+      const retardData = excludeInterne((retardRes.data || []) as StatRow[]);
+      const litigesData = excludeInterne((litigesRes.data || []) as StatRow[]);
+      const litigesPrevData = excludeInterne((litigesPrevRes.data || []) as StatRow[]);
+      const pertesData = excludeInterne((pertesRes.data || []) as StatRow[]);
+      const pertesPrevData = excludeInterne((pertesPrevRes.data || []) as StatRow[]);
+      const totalEnRetard = retardData.reduce((s, f) => s + (f.solde_restant || 0), 0);
 
       setKpiExtras({
         totalCreances,
         totalCreancesPrev,
+        totalEnRetard,
         totalFR,
         totalPT,
         facturesReglees,
@@ -281,8 +297,8 @@ export default function RapportDuJour() {
     fetchData();
   };
 
-  const pctRetard = rapport?.total_creances && rapport?.total_en_retard
-    ? Math.round((rapport.total_en_retard / rapport.total_creances) * 100)
+  const pctRetard = kpiExtras && kpiExtras.totalCreances > 0
+    ? Math.round((kpiExtras.totalEnRetard / kpiExtras.totalCreances) * 100)
     : 0;
 
   if (loading) {
@@ -321,7 +337,7 @@ export default function RapportDuJour() {
             };
           })() : null}
         />
-        <KPICard title="Total en retard" value={formatCurrency(rapport?.total_en_retard)} subtitle={`${pctRetard}% du total`} icon={AlertTriangle} variant="danger" />
+        <KPICard title="Total en retard" value={formatCurrency(kpiExtras?.totalEnRetard ?? 0)} subtitle={`${pctRetard}% du total`} icon={AlertTriangle} variant="danger" />
         <KPICard title="Actions du jour" value={String(actions.length)} icon={ListChecks} />
         <KPICard
           title="Factures réglées"
