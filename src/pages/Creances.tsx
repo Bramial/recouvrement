@@ -3,11 +3,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { getMaxMoisExtraction } from '@/lib/supabaseHelpers';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { Search, Mail, Phone, AlertTriangle, Loader2, XOctagon, RotateCcw, ArrowUp, ArrowDown, Undo2, Scale, ShieldCheck } from 'lucide-react';
+import { Search, Plus, XOctagon, RotateCcw, ArrowUp, ArrowDown, Undo2, Scale, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { useCountryFilter } from '@/hooks/useCountryFilter';
@@ -57,22 +58,31 @@ function formatCurrency(n: number) {
 
 const TYPE_ACTION_LABELS: Record<string, string> = {
   email_j7: 'Email J+7', appel_j15: 'Appel J+15', mise_en_demeure_j30: 'Mise en demeure', rappel_dgd: 'Rappel DGD',
+  appel_manuel: 'Appel', email_manuel: 'Email', relance_manuel: 'Relance',
+  courrier_manuel: 'Courrier', mise_en_demeure_manuel: 'Mise en demeure', autre_manuel: 'Autre',
 };
 const STATUT_LABELS: Record<string, string> = {
   a_faire: 'À faire', fait: 'Fait', ignore: 'Ignoré', reporte: 'Reporté',
 };
 
-function getActionType(joursRetard: number): { type: string; label: string; icon: typeof Mail } | null {
-  if (joursRetard > 30) return { type: 'mise_en_demeure_j30', label: 'Mise en demeure', icon: AlertTriangle };
-  if (joursRetard > 15) return { type: 'appel_j15', label: 'Appel J+15', icon: Phone };
-  if (joursRetard > 7) return { type: 'email_j7', label: 'Email J+7', icon: Mail };
-  return null;
-}
+const MANUAL_ACTION_TYPES = [
+  { value: 'appel_manuel', label: 'Appel téléphonique' },
+  { value: 'email_manuel', label: 'Email envoyé' },
+  { value: 'relance_manuel', label: 'Relance' },
+  { value: 'courrier_manuel', label: 'Courrier envoyé' },
+  { value: 'mise_en_demeure_manuel', label: 'Mise en demeure' },
+  { value: 'autre_manuel', label: 'Autre' },
+];
 
 export default function Creances() {
   const [factures, setFactures] = useState<Facture[]>([]);
-  const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [manualModal, setManualModal] = useState<Facture | null>(null);
+  const [manualMode, setManualMode] = useState<'past' | 'scheduled'>('past');
+  const [manualType, setManualType] = useState('appel_manuel');
+  const [manualDate, setManualDate] = useState('');
+  const [manualNotes, setManualNotes] = useState('');
+  const [savingManual, setSavingManual] = useState(false);
   const [search, setSearch] = useState('');
   const { country } = useCountryFilter();
   const [retardFilter, setRetardFilter] = useState('all');
@@ -153,60 +163,36 @@ export default function Creances() {
     setActionsHistory((data || []) as unknown as ActionRelance[]);
   };
 
-  const generateAction = async (f: Facture, e: React.MouseEvent) => {
+  const openManualModal = (f: Facture, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (f.type_document === 'REC' || f.type_document === 'NCRE') {
-      toast.warning('Pas de relance sur les règlements/avoirs.');
-      return;
-    }
-    if (f.statut === 'litige') {
-      toast.warning('Cette facture est en litige.');
-      return;
-    }
-    if (f.statut === 'retention_dgd') {
-      toast.warning('Cette facture est en rétention DGD.');
-      return;
-    }
-    if (f.clients?.exclusion_relance) {
-      toast.warning('Ce client est exclu des relances.');
-      return;
-    }
-    const retard = joursRetard(f.date_echeance);
-    const actionDef = getActionType(retard);
-    if (!actionDef) return;
+    setManualModal(f);
+    setManualMode('past');
+    setManualType('appel_manuel');
+    setManualDate(new Date().toISOString().split('T')[0]);
+    setManualNotes('');
+  };
 
-    setGeneratingId(f.id);
-    const today = new Date().toISOString().split('T')[0];
-
-    // Check if an active action already exists for this invoice
-    const { data: existing } = await supabase
-      .from('actions_relance')
-      .select('id')
-      .eq('facture_id', f.id)
-      .eq('type_action', actionDef.type)
-      .eq('statut', 'a_faire')
-      .limit(1);
-
-    if (existing && existing.length > 0) {
-      toast.warning('Une action de ce type existe déjà pour cette facture.');
-      setGeneratingId(null);
-      return;
-    }
-
+  const addManualAction = async () => {
+    if (!manualModal || !manualDate || !manualNotes.trim()) return;
+    setSavingManual(true);
+    const isScheduled = manualMode === 'scheduled';
     const { error } = await supabase.from('actions_relance').insert({
-      facture_id: f.id,
-      client_id: f.client_id,
-      type_action: actionDef.type,
-      date_prevue: today,
-      statut: 'a_faire',
+      client_id: manualModal.client_id,
+      facture_id: manualModal.id,
+      type_action: manualType,
+      date_prevue: manualDate,
+      date_executee: isScheduled ? null : manualDate,
+      statut: isScheduled ? 'a_faire' : 'fait',
+      notes: manualNotes.trim(),
     });
-
     if (error) {
-      toast.error("Erreur lors de la création de l'action.");
-    } else {
-      toast.success(`Action "${actionDef.label}" créée pour ${f.clients?.nom}`);
+      toast.error('Erreur lors de la sauvegarde de l\'action');
+      setSavingManual(false);
+      return;
     }
-    setGeneratingId(null);
+    toast.success(isScheduled ? `Action programmée pour le ${manualDate}` : 'Action ajoutée à l\'historique');
+    setManualModal(null);
+    setSavingManual(false);
   };
 
   const toggleSort = (field: typeof sortField) => {
@@ -308,8 +294,6 @@ export default function Creances() {
               {filtered.map((f) => {
                 const retard = joursRetard(f.date_echeance);
                 const badge = retardBadge(retard);
-                const actionDef = getActionType(retard);
-                const ActionIcon = actionDef?.icon;
                 return (
                   <tr key={f.id} className="border-b hover:bg-muted/30 cursor-pointer" onClick={() => openDetail(f)}>
                     <td className="p-3 font-medium" onClick={(e) => e.stopPropagation()}>
@@ -335,22 +319,15 @@ export default function Creances() {
                     <td className="p-3 text-center"><Badge className={badge.className}>{badge.label}</Badge></td>
                     <td className="p-3">{f.clients?.code_client.startsWith('FR_') ? '🇫🇷 FR' : f.clients?.code_client.startsWith('PT_') ? '🇵🇹 PT' : f.source}</td>
                     <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
-                      {(f.statut === 'litige' || f.statut === 'retention_dgd') ? (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      ) : actionDef && ActionIcon ? (
-                        <Button
-                          size="sm"
-                          variant={actionDef.type === 'mise_en_demeure_j30' ? 'destructive' : actionDef.type === 'appel_j15' ? 'outline' : 'default'}
-                          className="text-xs gap-1"
-                          disabled={generatingId === f.id}
-                          onClick={(e) => generateAction(f, e)}
-                        >
-                          {generatingId === f.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <ActionIcon className="h-3 w-3" />}
-                          {actionDef.label}
-                        </Button>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-xs gap-1"
+                        onClick={(e) => openManualModal(f, e)}
+                        title="Ajouter une action de relance"
+                      >
+                        <Plus className="h-3.5 w-3.5" /> Action
+                      </Button>
                     </td>
                     <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-center gap-1">
@@ -431,6 +408,67 @@ export default function Creances() {
           )}
         </SheetContent>
       </Sheet>
+
+      {manualModal && (
+        <div className="fixed inset-0 bg-foreground/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-card rounded-lg p-6 w-full max-w-md space-y-4">
+            <h3 className="font-semibold">{manualMode === 'scheduled' ? 'Programmer une action' : 'Ajouter une action passée'}</h3>
+            <p className="text-sm text-muted-foreground">
+              Facture <span className="font-medium text-foreground">{manualModal.numero_facture}</span> — {manualModal.clients?.nom}
+            </p>
+            <div className="flex gap-1 rounded-lg bg-muted p-1">
+              <button
+                className={`flex-1 text-xs font-medium px-3 py-1.5 rounded-md transition-colors ${manualMode === 'past' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                onClick={() => setManualMode('past')}
+              >
+                Action passée
+              </button>
+              <button
+                className={`flex-1 text-xs font-medium px-3 py-1.5 rounded-md transition-colors ${manualMode === 'scheduled' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                onClick={() => setManualMode('scheduled')}
+              >
+                Programmer
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {manualMode === 'scheduled'
+                ? 'Cette action apparaîtra dans le rapport du jour à la date prévue.'
+                : 'Tracez une action de relance déjà effectuée.'}
+            </p>
+            <div className="space-y-2">
+              <Label>Type d'action</Label>
+              <Select value={manualType} onValueChange={setManualType}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {MANUAL_ACTION_TYPES.map(t => (
+                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>{manualMode === 'scheduled' ? 'Date prévue' : "Date de l'action"}</Label>
+              <Input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>{manualMode === 'scheduled' ? 'Description de l\'action à réaliser' : 'Description / Notes'}</Label>
+              <textarea
+                className="w-full border rounded-md p-3 text-sm min-h-[80px] bg-background"
+                placeholder={manualMode === 'scheduled' ? 'Ex: Appeler le client suite au dernier mail de relance...' : 'Ex: Appel au client, laissé un message vocal concernant les factures impayées...'}
+                value={manualNotes}
+                onChange={(e) => setManualNotes(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setManualModal(null)}>Annuler</Button>
+              <Button onClick={addManualAction} disabled={!manualDate || !manualNotes.trim() || savingManual}>
+                {manualMode === 'scheduled' ? 'Programmer' : 'Ajouter à l\'historique'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {litigeModal && (
         <div className="fixed inset-0 bg-foreground/50 flex items-center justify-center z-50 p-4">
