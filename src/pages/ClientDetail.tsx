@@ -131,10 +131,13 @@ export default function ClientDetail() {
     load();
   }, [id]);
 
-  const activeFactures = allFactures.filter(f => showPertes ? f.statut === 'perte' : (f.statut === 'en_cours' || f.statut === 'litige' || f.statut === 'retention_dgd'));
-  const invoices = activeFactures.filter(f => f.type_document === 'FACT' || f.type_document === 'NDEB');
+  // Bloc "Factures en cours" : strict statut='en_cours' (ou 'perte' si toggle), tous types
+  // confondus (FACT, NDEB, NCRE, REC). Les négatifs réduisent le dû. Tri par date desc.
+  const invoices = allFactures
+    .filter(f => showPertes ? (f.statut === 'perte' || f.statut === 'pertes_profits') : f.statut === 'en_cours')
+    .sort((a, b) => new Date(b.date_emission).getTime() - new Date(a.date_emission).getTime());
   const totalResteDu = invoices.reduce((s, f) => s + Number(f.solde_restant ?? f.montant ?? 0), 0);
-  const pertesCount = allFactures.filter(f => f.statut === 'perte').length;
+  const pertesCount = allFactures.filter(f => f.statut === 'perte' || f.statut === 'pertes_profits').length;
   // Historique complet : documents + lignes virtuelles "Paiement détecté" + lignes
   // "Passage en perte" tirées des actions auto-générées. Tout trié par date desc.
   const historique: HistoryRow[] = (() => {
@@ -154,10 +157,10 @@ export default function ClientDetail() {
     }
     return rows.sort((a, b) => new Date(b.sortDate).getTime() - new Date(a.sortDate).getTime());
   })();
-  // Solde net = somme des solde_restant des FACT/NDEB encore actives (perte exclue, REC/NCRE
-  // déjà absorbés dans ces soldes).
+  // Solde net = somme des solde_restant des lignes en_cours (tous types). Les NCRE/REC
+  // négatives réduisent le dû ; perte/litige/retention_dgd/payee sont exclus.
   const soldeNet = allFactures
-    .filter(f => (f.type_document === 'FACT' || f.type_document === 'NDEB') && f.statut !== 'perte' && f.statut !== 'pertes_profits')
+    .filter(f => f.statut === 'en_cours')
     .reduce((s, f) => s + Number(f.solde_restant ?? f.montant ?? 0), 0);
 
   const perteFacture = async (facture: Facture, perte: boolean) => {
@@ -406,7 +409,7 @@ export default function ClientDetail() {
     setSavingManual(false);
   };
 
-  const formatCurrency = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: 0 }).format(n);
+  const formatCurrency = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 
   if (!client) return <div className="flex items-center justify-center h-64 text-muted-foreground">Chargement...</div>;
 
@@ -467,30 +470,31 @@ export default function ClientDetail() {
           <table className="w-full text-sm">
             <thead><tr className="border-b bg-muted/50">
               <th className="text-left p-3">N°</th>
+              <th className="text-left p-3">Type</th>
               <th className="text-right p-3">Montant</th>
               <th className="text-right p-3">Reste dû</th>
               <th className="text-left p-3">Échéance</th>
               <th className="text-center p-3"></th>
             </tr></thead>
             <tbody>
-              {invoices.map(f => (
+              {invoices.map(f => {
+                const typeBadgeMeta: Record<string, { label: string; className: string }> = {
+                  FACT: { label: 'Facture', className: 'bg-blue-100 text-blue-700 border-blue-200' },
+                  NDEB: { label: 'Note débit', className: 'bg-blue-100 text-blue-700 border-blue-200' },
+                  NCRE: { label: 'Avoir', className: 'bg-orange-100 text-orange-700 border-orange-200' },
+                  REC: { label: 'Acompte', className: 'bg-orange-100 text-orange-700 border-orange-200' },
+                };
+                const tb = typeBadgeMeta[f.type_document] || { label: f.type_document, className: '' };
+                return (
                 <tr key={f.id} className="border-b">
                   <td className="p-3">
                     {f.numero_facture}
-                    {f.statut === 'litige' && (
-                      <Badge
-                        className="ml-2 bg-badge-danger text-badge-danger-foreground cursor-pointer hover:opacity-80"
-                        onClick={() => { setLitigeDetailModal(f); setNewLitigeNote(''); }}
-                      >Litige</Badge>
-                    )}
-                    {f.statut === 'retention_dgd' && (
-                      <Badge className="ml-2 bg-badge-info text-badge-info-foreground" title={f.date_reception_dgd ? `Rappel le ${new Date(new Date(f.date_reception_dgd).setFullYear(new Date(f.date_reception_dgd).getFullYear() + 1)).toLocaleDateString('fr-FR')}` : ''}>
-                        DGD {f.date_reception_dgd && `→ ${new Date(new Date(f.date_reception_dgd).setFullYear(new Date(f.date_reception_dgd).getFullYear() + 1)).toLocaleDateString('fr-FR')}`}
-                      </Badge>
-                    )}
+                  </td>
+                  <td className="p-3">
+                    <Badge variant="outline" className={`text-xs ${tb.className}`}>{tb.label}</Badge>
                   </td>
                   <td className="p-3 text-right text-muted-foreground">{formatCurrency(f.montant)}</td>
-                  <td className="p-3 text-right font-medium">{formatCurrency(f.solde_restant ?? f.montant)}</td>
+                  <td className="p-3 text-right font-medium">{formatCurrency(Number(f.solde_restant ?? f.montant ?? 0))}</td>
                   <td className="p-3">{f.date_echeance}</td>
                   <td className="p-3 text-center">
                     <div className="flex items-center justify-center gap-1">
@@ -511,7 +515,7 @@ export default function ClientDetail() {
                           <RotateCcw className="h-3.5 w-3.5" />
                         </Button>
                       </>
-                    ) : (
+                    ) : (f.type_document === 'FACT' || f.type_document === 'NDEB') ? (
                       <>
                         <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => { setDgdModal(f); setDgdDate(''); }} title="Rétention DGD">
                           <ShieldCheck className="h-3.5 w-3.5" />
@@ -523,11 +527,12 @@ export default function ClientDetail() {
                           <XOctagon className="h-3.5 w-3.5" />
                         </Button>
                       </>
-                    )}
+                    ) : null}
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
           {invoices.length === 0 && <p className="text-center text-muted-foreground py-4">{showPertes ? 'Aucune facture en perte.' : 'Aucune facture en cours.'}</p>}
@@ -597,19 +602,30 @@ export default function ClientDetail() {
                       const typeBadge: Record<string, { label: string; className: string }> = {
                         FACT: { label: 'Facture', className: 'bg-blue-100 text-blue-700 border-blue-200' },
                         NDEB: { label: 'Note de débit', className: 'bg-blue-100 text-blue-700 border-blue-200' },
-                        REC: { label: 'Règlement', className: 'bg-green-100 text-green-700 border-green-200' },
+                        REC: { label: 'Acompte', className: 'bg-orange-100 text-orange-700 border-orange-200' },
                         NCRE: { label: 'Avoir', className: 'bg-orange-100 text-orange-700 border-orange-200' },
                       };
+                      const statutBadge: Record<string, { label: string; className: string }> = {
+                        en_cours: { label: 'En cours', className: 'bg-muted text-muted-foreground border-border' },
+                        payee: { label: 'Réglée', className: 'bg-green-100 text-green-700 border-green-200' },
+                        litige: { label: 'Litige', className: 'bg-badge-danger text-badge-danger-foreground border-badge-danger' },
+                        retention_dgd: { label: 'Rétention DGD', className: 'bg-blue-100 text-blue-700 border-blue-200' },
+                        perte: { label: 'Perte', className: 'bg-red-100 text-red-700 border-red-200' },
+                        pertes_profits: { label: 'Perte', className: 'bg-red-100 text-red-700 border-red-200' },
+                      };
                       const badge = typeBadge[f.type_document] || { label: f.type_document, className: '' };
-                      const isInvoice = f.type_document === 'FACT' || f.type_document === 'NDEB';
-                      const solde = Number(f.solde_restant ?? f.montant ?? 0);
+                      const sb = statutBadge[f.statut] || { label: f.statut, className: '' };
+                      const solde = Number(f.solde_restant ?? 0);
                       return (
                         <tr key={f.id} className="border-b">
                           <td className="p-3">{f.numero_facture}</td>
-                          <td className="p-3"><Badge variant="outline" className={`text-xs ${badge.className}`}>{badge.label}</Badge></td>
+                          <td className="p-3 space-y-1">
+                            <div><Badge variant="outline" className={`text-xs ${badge.className}`}>{badge.label}</Badge></div>
+                            <div><Badge variant="outline" className={`text-xs ${sb.className}`}>{sb.label}</Badge></div>
+                          </td>
                           <td className="p-3 text-right text-muted-foreground">{formatCurrency(f.montant)}</td>
-                          <td className={`p-3 text-right font-medium ${isInvoice ? (solde === 0 ? 'text-green-600' : '') : 'text-muted-foreground'}`}>
-                            {isInvoice ? formatCurrency(solde) : '—'}
+                          <td className={`p-3 text-right font-medium ${solde === 0 ? 'text-green-600' : solde < 0 ? 'text-orange-700' : ''}`}>
+                            {formatCurrency(solde)}
                           </td>
                           <td className="p-3 text-muted-foreground">{f.date_emission}</td>
                         </tr>
@@ -619,8 +635,8 @@ export default function ClientDetail() {
                   <tfoot>
                     <tr className="border-t-2 bg-muted/30 font-semibold">
                       <td className="p-3" colSpan={3}>Solde net</td>
-                      <td className={`p-3 text-right ${soldeNet <= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {soldeNet <= 0 ? `${formatCurrency(soldeNet)} — Soldé` : formatCurrency(soldeNet)}
+                      <td className={`p-3 text-right ${soldeNet > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                        {formatCurrency(soldeNet)}
                       </td>
                       <td className="p-3"></td>
                     </tr>

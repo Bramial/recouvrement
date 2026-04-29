@@ -55,6 +55,8 @@ interface KpiExtras {
   facturesReglees: FactureResume[];
   nouvellesFactures: FactureResume[];
   reglementsRecus: FactureResume[];
+  litiges: FactureResume[];
+  pertes: FactureResume[];
   totalLitiges: number;
   totalLitigesPrev: number;
   nbLitiges: number;
@@ -83,8 +85,8 @@ const TYPE_ACTION_LABELS: Record<string, { label: string; className: string }> =
 };
 
 function formatCurrency(n: number | null | undefined) {
-  if (n == null) return '0 €';
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
+  if (n == null) return '0,00 €';
+  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 }
 
 function joursRetard(dateEcheance: string) {
@@ -110,6 +112,8 @@ export default function RapportDuJour() {
   const [showRegleesModal, setShowRegleesModal] = useState(false);
   const [showNouvellesModal, setShowNouvellesModal] = useState(false);
   const [showReglementsModal, setShowReglementsModal] = useState(false);
+  const [showLitigesModal, setShowLitigesModal] = useState(false);
+  const [showPertesModal, setShowPertesModal] = useState(false);
   const { country } = useCountryFilter();
 
   const today = format(new Date(), 'yyyy-MM-dd');
@@ -154,20 +158,19 @@ export default function RapportDuJour() {
         .maybeSingle();
       const latestApparition = latestAppRow?.derniere_apparition as string | undefined;
 
-      // Current month: factures en_cours for total créances + répartition FR/PT (FACT/NDEB only, soldes recalculés)
+      // Total créances : SUM(solde_restant) WHERE statut='en_cours' tous types confondus.
+      // Les NCRE/REC négatifs réduisent le dû net — pas de filtre par type_document.
       let currentQuery = supabase.from('factures')
         .select('solde_restant, source, client_id, clients(code_client, client_interne)')
         .eq('mois_extraction', maxMois)
-        .in('statut', ['en_cours', 'retention_dgd'])
-        .in('type_document', ['FACT', 'NDEB']);
+        .eq('statut', 'en_cours');
       if (country !== 'all') currentQuery = currentQuery.eq('source', country);
 
-      // Previous month: total créances for comparison
+      // Previous month: même règle pour la comparaison de tendance
       let prevQuery = supabase.from('factures')
         .select('solde_restant, clients(client_interne)')
         .eq('mois_extraction', prevMois)
-        .in('statut', ['en_cours', 'retention_dgd'])
-        .in('type_document', ['FACT', 'NDEB']);
+        .eq('statut', 'en_cours');
       if (country !== 'all') prevQuery = prevQuery.eq('source', country);
 
       // Factures réglées: payee + disparue du dernier import (derniere_apparition < latest).
@@ -203,17 +206,19 @@ export default function RapportDuJour() {
         .lt('date_echeance', today);
       if (country !== 'all') retardQuery = retardQuery.eq('source', country);
 
-      // Litiges current & previous
+      // Litiges current (détail pour modal) & previous (solde only pour trend)
       let litigesQuery = supabase.from('factures')
-        .select('solde_restant, clients(client_interne)').eq('mois_extraction', maxMois).eq('statut', 'litige');
+        .select('numero_facture, montant, solde_restant, source, clients(nom, client_interne)')
+        .eq('mois_extraction', maxMois).eq('statut', 'litige');
       if (country !== 'all') litigesQuery = litigesQuery.eq('source', country);
       let litigesPrevQuery = supabase.from('factures')
         .select('solde_restant, clients(client_interne)').eq('mois_extraction', prevMois).eq('statut', 'litige');
       if (country !== 'all') litigesPrevQuery = litigesPrevQuery.eq('source', country);
 
-      // Pertes current & previous (inclut 'perte' manuelle + 'pertes_profits' importé)
+      // Pertes current (détail pour modal) & previous (inclut 'perte' manuelle + 'pertes_profits' importé)
       let pertesQuery = supabase.from('factures')
-        .select('solde_restant, clients(client_interne)').eq('mois_extraction', maxMois).in('statut', ['perte', 'pertes_profits']);
+        .select('numero_facture, montant, solde_restant, source, clients(nom, client_interne)')
+        .eq('mois_extraction', maxMois).in('statut', ['perte', 'pertes_profits']);
       if (country !== 'all') pertesQuery = pertesQuery.eq('source', country);
       let pertesPrevQuery = supabase.from('factures')
         .select('solde_restant, clients(client_interne)').eq('mois_extraction', prevMois).in('statut', ['perte', 'pertes_profits']);
@@ -257,11 +262,14 @@ export default function RapportDuJour() {
       type StatRow = { solde_restant: number | null; clients: { client_interne: boolean } | null };
       const excludeInterne = (rows: StatRow[]) => rows.filter(r => !r.clients?.client_interne);
       const retardData = excludeInterne((retardRes.data || []) as StatRow[]);
-      const litigesData = excludeInterne((litigesRes.data || []) as StatRow[]);
       const litigesPrevData = excludeInterne((litigesPrevRes.data || []) as StatRow[]);
-      const pertesData = excludeInterne((pertesRes.data || []) as StatRow[]);
       const pertesPrevData = excludeInterne((pertesPrevRes.data || []) as StatRow[]);
       const totalEnRetard = retardData.reduce((s, f) => s + (f.solde_restant || 0), 0);
+
+      const litiges = ((litigesRes.data || []) as FactureRow[])
+        .filter(f => !f.clients?.client_interne);
+      const pertes = ((pertesRes.data || []) as FactureRow[])
+        .filter(f => !f.clients?.client_interne);
 
       setKpiExtras({
         totalCreances,
@@ -272,10 +280,12 @@ export default function RapportDuJour() {
         facturesReglees,
         nouvellesFactures,
         reglementsRecus,
-        totalLitiges: litigesData.reduce((s, f) => s + (f.solde_restant || 0), 0),
+        litiges: litiges.map(toResume),
+        pertes: pertes.map(toResume),
+        totalLitiges: litiges.reduce((s, f) => s + (f.solde_restant || 0), 0),
         totalLitigesPrev: litigesPrevData.reduce((s, f) => s + (f.solde_restant || 0), 0),
-        nbLitiges: litigesData.length,
-        totalPertes: pertesData.reduce((s, f) => s + (f.solde_restant || 0), 0),
+        nbLitiges: litiges.length,
+        totalPertes: pertes.reduce((s, f) => s + (f.solde_restant || 0), 0),
         totalPertesPrev: pertesPrevData.reduce((s, f) => s + (f.solde_restant || 0), 0),
       });
     }
@@ -374,6 +384,7 @@ export default function RapportDuJour() {
           subtitle={`${kpiExtras?.nbLitiges ?? 0} facture${(kpiExtras?.nbLitiges ?? 0) > 1 ? 's' : ''}`}
           icon={Scale}
           variant="warning"
+          onClick={() => setShowLitigesModal(true)}
           trend={kpiExtras && kpiExtras.totalLitigesPrev > 0 ? (() => {
             const diff = (kpiExtras.totalLitiges) - (kpiExtras.totalLitigesPrev);
             const pct = Math.round(Math.abs(diff) / kpiExtras.totalLitigesPrev * 100);
@@ -390,6 +401,7 @@ export default function RapportDuJour() {
           value={formatCurrency(kpiExtras?.totalPertes ?? 0)}
           icon={XOctagon}
           variant="danger"
+          onClick={() => setShowPertesModal(true)}
           trend={kpiExtras && kpiExtras.totalPertesPrev > 0 ? (() => {
             const diff = (kpiExtras.totalPertes) - (kpiExtras.totalPertesPrev);
             const pct = Math.round(Math.abs(diff) / kpiExtras.totalPertesPrev * 100);
@@ -564,6 +576,54 @@ export default function RapportDuJour() {
                     <p className="text-xs text-muted-foreground">#{f.numero_facture} · {f.source}</p>
                   </div>
                   <p className="text-sm font-semibold whitespace-nowrap">{formatCurrency(f.montant)}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showLitigesModal && kpiExtras && (
+        <div className="fixed inset-0 bg-foreground/50 flex items-center justify-center z-50 p-4" onClick={() => setShowLitigesModal(false)}>
+          <div className="bg-card rounded-lg p-6 w-full max-w-lg max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold">Litiges en cours ({kpiExtras.litiges.length})</h3>
+              <Button size="sm" variant="ghost" onClick={() => setShowLitigesModal(false)}><X className="h-4 w-4" /></Button>
+            </div>
+            <div className="overflow-y-auto space-y-2">
+              {kpiExtras.litiges.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4">Aucun litige.</p>
+              ) : kpiExtras.litiges.map((f) => (
+                <div key={f.numero_facture} className="border rounded-md p-3 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{f.client_nom}</p>
+                    <p className="text-xs text-muted-foreground">#{f.numero_facture} · {f.source}</p>
+                  </div>
+                  <p className="text-sm font-semibold whitespace-nowrap">{formatCurrency(f.solde_restant ?? f.montant)}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPertesModal && kpiExtras && (
+        <div className="fixed inset-0 bg-foreground/50 flex items-center justify-center z-50 p-4" onClick={() => setShowPertesModal(false)}>
+          <div className="bg-card rounded-lg p-6 w-full max-w-lg max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold">Pertes cumulées ({kpiExtras.pertes.length})</h3>
+              <Button size="sm" variant="ghost" onClick={() => setShowPertesModal(false)}><X className="h-4 w-4" /></Button>
+            </div>
+            <div className="overflow-y-auto space-y-2">
+              {kpiExtras.pertes.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4">Aucune perte.</p>
+              ) : kpiExtras.pertes.map((f) => (
+                <div key={f.numero_facture} className="border rounded-md p-3 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{f.client_nom}</p>
+                    <p className="text-xs text-muted-foreground">#{f.numero_facture} · {f.source}</p>
+                  </div>
+                  <p className="text-sm font-semibold whitespace-nowrap">{formatCurrency(f.solde_restant ?? f.montant)}</p>
                 </div>
               ))}
             </div>
