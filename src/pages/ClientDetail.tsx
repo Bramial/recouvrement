@@ -46,6 +46,7 @@ const TYPE_ACTION_META: Record<string, { label: string; icon: string }> = {
   courrier_manuel: { label: 'Courrier', icon: '✉️' },
   mise_en_demeure_manuel: { label: 'Mise en demeure', icon: '📄' },
   autre_manuel: { label: 'Autre', icon: '📋' },
+  passage_perte: { label: 'Passage en perte', icon: '🛑' },
 };
 
 const MANUAL_ACTION_TYPES = [
@@ -154,6 +155,24 @@ export default function ClientDetail() {
     const newStatut = perte ? 'perte' : 'en_cours';
     await supabase.from('factures').update({ statut: newStatut }).eq('id', facture.id);
     setAllFactures(prev => prev.map(f => f.id === facture.id ? { ...f, statut: newStatut } : f));
+
+    if (perte && client) {
+      const today = new Date().toISOString().split('T')[0];
+      const montant = Number(facture.solde_restant ?? facture.montant ?? 0);
+      const formattedMontant = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: 0 }).format(montant);
+      const { error } = await supabase.from('actions_relance').insert({
+        client_id: client.id,
+        facture_id: facture.id,
+        type_action: 'passage_perte',
+        date_prevue: today,
+        date_executee: today,
+        statut: 'fait',
+        notes: `Facture ${facture.numero_facture} passée en perte — ${formattedMontant}`,
+      });
+      if (error) toast.error("Statut mis à jour mais l'audit n'a pas pu être enregistré");
+      else await reloadActions();
+    }
+
     toast.success(perte ? `Facture ${facture.numero_facture} passée en perte` : `Facture ${facture.numero_facture} restaurée`);
   };
 
