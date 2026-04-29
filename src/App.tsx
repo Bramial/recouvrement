@@ -15,6 +15,7 @@ import ClientDetail from "@/pages/ClientDetail";
 import Historique from "@/pages/Historique";
 import FacturesReglees from "@/pages/FacturesReglees";
 import Pertes from "@/pages/Pertes";
+import Templates from "@/pages/Templates";
 import UserManagement from "@/pages/UserManagement";
 import NotFound from "@/pages/NotFound";
 import { RequireAdmin } from "@/components/RequireAdmin";
@@ -41,6 +42,7 @@ function ProtectedRoutes() {
         <Route path="/factures-reglees" element={<FacturesReglees />} />
         <Route path="/pertes" element={<Pertes />} />
         <Route path="/historique" element={<Historique />} />
+        <Route path="/templates" element={<Templates />} />
         <Route path="/users" element={<RequireAdmin><UserManagement /></RequireAdmin>} />
         <Route path="*" element={<NotFound />} />
       </Routes>

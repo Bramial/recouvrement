@@ -1,4 +1,4 @@
-import { FileText, Users, Clock, BarChart3, LogOut, CheckCircle, Shield } from 'lucide-react';
+import { FileText, Users, Clock, BarChart3, LogOut, CheckCircle, Shield, Mail } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/hooks/useAuth';
 import {
@@ -20,6 +20,7 @@ const navItems = [
   { title: 'Clients', url: '/clients', icon: Users },
   { title: 'Factures réglées', url: '/factures-reglees', icon: CheckCircle },
   { title: 'Historique', url: '/historique', icon: Clock },
+  { title: 'Templates', url: '/templates', icon: Mail },
 ];
 
 export function AppSidebar() {

@@ -27,7 +27,7 @@ interface Action {
   contenu_email: string | null;
   notes: string | null;
   factures: { numero_facture: string; montant: number; date_echeance: string; solde_restant: number | null; statut: string; type_document: string } | null;
-  clients: { nom: string; email: string | null; telephone: string | null; code_client: string; client_interne: boolean } | null;
+  clients: { nom: string; email: string | null; telephone: string | null; code_client: string; conditions_paiement: string | null; client_interne: boolean } | null;
 }
 
 interface Rapport {
@@ -124,7 +124,7 @@ export default function RapportDuJour() {
     setLoading(true);
     const clientsJoin = country !== 'all' ? 'clients!inner' : 'clients';
     let actionsQuery = supabase.from('actions_relance')
-      .select(`*, factures(numero_facture, montant, date_echeance, solde_restant, statut, type_document), ${clientsJoin}(nom, email, telephone, code_client, client_interne)`)
+      .select(`*, factures(numero_facture, montant, date_echeance, solde_restant, statut, type_document), ${clientsJoin}(nom, email, telephone, code_client, conditions_paiement, client_interne)`)
       .eq('statut', 'a_faire').lte('date_prevue', today);
     if (country !== 'all') actionsQuery = actionsQuery.ilike('clients.code_client', `${country}_%`);
 
