@@ -15,6 +15,7 @@ import { fr } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { useCountryFilter } from '@/hooks/useCountryFilter';
 import { CountryFilter } from '@/components/CountryFilter';
+import { useAuth } from '@/hooks/useAuth';
 
 interface Action {
   id: string;
@@ -115,6 +116,7 @@ export default function RapportDuJour() {
   const [showLitigesModal, setShowLitigesModal] = useState(false);
   const [showPertesModal, setShowPertesModal] = useState(false);
   const { country } = useCountryFilter();
+  const { canWrite } = useAuth();
 
   const today = format(new Date(), 'yyyy-MM-dd');
 
@@ -452,32 +454,34 @@ export default function RapportDuJour() {
                       </div>
                       {action.notes && <p className="text-xs text-muted-foreground mt-1.5 whitespace-pre-line">{action.notes}</p>}
                     </div>
-                    <div className="flex items-center gap-2 flex-wrap shrink-0">
-                      {isEmail && (
-                        <Button size="sm" variant="default" onClick={() => setEmailModal(action)}>
-                          <Mail className="h-3.5 w-3.5 mr-1" /> Voir email
+                    {canWrite && (
+                      <div className="flex items-center gap-2 flex-wrap shrink-0">
+                        {isEmail && (
+                          <Button size="sm" variant="default" onClick={() => setEmailModal(action)}>
+                            <Mail className="h-3.5 w-3.5 mr-1" /> Voir email
+                          </Button>
+                        )}
+                        {isCall && (
+                          <Button size="sm" variant="default" onClick={() => setCallModal(action)}>
+                            <Phone className="h-3.5 w-3.5 mr-1" /> Appel fait
+                          </Button>
+                        )}
+                        {isManual && (
+                          <Button size="sm" variant="default" onClick={() => setCallModal(action)}>
+                            <CheckCircle className="h-3.5 w-3.5 mr-1" /> Fait
+                          </Button>
+                        )}
+                        <Button size="sm" variant="outline" onClick={() => setReportModal(action)}>
+                          <Calendar className="h-3.5 w-3.5 mr-1" /> Reporter
                         </Button>
-                      )}
-                      {isCall && (
-                        <Button size="sm" variant="default" onClick={() => setCallModal(action)}>
-                          <Phone className="h-3.5 w-3.5 mr-1" /> Appel fait
+                        <Button size="sm" variant="outline" onClick={() => { setIgnoreModal(action); setIgnoreNote(''); }}>
+                          <X className="h-3.5 w-3.5 mr-1" /> Ignorer
                         </Button>
-                      )}
-                      {isManual && (
-                        <Button size="sm" variant="default" onClick={() => setCallModal(action)}>
-                          <CheckCircle className="h-3.5 w-3.5 mr-1" /> Fait
+                        <Button size="sm" variant="ghost" onClick={() => setNoteModal(action)}>
+                          <MessageSquare className="h-3.5 w-3.5" />
                         </Button>
-                      )}
-                      <Button size="sm" variant="outline" onClick={() => setReportModal(action)}>
-                        <Calendar className="h-3.5 w-3.5 mr-1" /> Reporter
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => { setIgnoreModal(action); setIgnoreNote(''); }}>
-                        <X className="h-3.5 w-3.5 mr-1" /> Ignorer
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setNoteModal(action)}>
-                        <MessageSquare className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}

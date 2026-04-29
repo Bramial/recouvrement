@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { ChevronDown, ChevronRight, Upload, Trash2 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { toast } from 'sonner';
+import { useAuth } from '@/hooks/useAuth';
 
 interface Rapport {
   id: string; date_rapport: string; total_creances: number | null;
@@ -125,6 +126,7 @@ export default function Historique() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { canWrite } = useAuth();
 
   useEffect(() => {
     Promise.all([
@@ -310,25 +312,27 @@ export default function Historique() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base">Imports</CardTitle>
-          <div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              multiple
-              className="hidden"
-              onChange={(e) => handleUpload(e.target.files)}
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={uploading}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <Upload className="h-4 w-4 mr-2" />
-              {uploading ? 'Upload…' : 'Uploader pendentes (Excel)'}
-            </Button>
-          </div>
+          {canWrite && (
+            <div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                multiple
+                className="hidden"
+                onChange={(e) => handleUpload(e.target.files)}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={uploading}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                {uploading ? 'Upload…' : 'Uploader pendentes (Excel)'}
+              </Button>
+            </div>
+          )}
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
           <table className="w-full text-sm">
@@ -358,7 +362,7 @@ export default function Historique() {
                   </td>
                   <td className="p-3 text-muted-foreground">{new Date(i.date_import).toLocaleDateString('fr-FR')}</td>
                   <td className="p-3 text-right">
-                    {i.statut === 'a_traiter' && (
+                    {i.statut === 'a_traiter' && canWrite && (
                       <Button
                         size="icon"
                         variant="ghost"

@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { useCountryFilter } from '@/hooks/useCountryFilter';
 import { CountryFilter } from '@/components/CountryFilter';
+import { useAuth } from '@/hooks/useAuth';
 
 interface Facture {
   id: string;
@@ -85,6 +86,7 @@ export default function Creances() {
   const [savingManual, setSavingManual] = useState(false);
   const [search, setSearch] = useState('');
   const { country } = useCountryFilter();
+  const { canWrite } = useAuth();
   const [retardFilter, setRetardFilter] = useState('all');
   const [sortField, setSortField] = useState<'retard' | 'montant' | 'nom'>('retard');
   const [sortAsc, setSortAsc] = useState(false);
@@ -319,19 +321,23 @@ export default function Creances() {
                     <td className="p-3 text-center"><Badge className={badge.className}>{badge.label}</Badge></td>
                     <td className="p-3">{f.clients?.code_client.startsWith('FR_') ? '🇫🇷 FR' : f.clients?.code_client.startsWith('PT_') ? '🇵🇹 PT' : f.source}</td>
                     <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-xs gap-1"
-                        onClick={(e) => openManualModal(f, e)}
-                        title="Ajouter une action de relance"
-                      >
-                        <Plus className="h-3.5 w-3.5" /> Action
-                      </Button>
+                      {canWrite ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-xs gap-1"
+                          onClick={(e) => openManualModal(f, e)}
+                          title="Ajouter une action de relance"
+                        >
+                          <Plus className="h-3.5 w-3.5" /> Action
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
                     </td>
                     <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-center gap-1">
-                        {f.statut === 'litige' ? (
+                        {canWrite && (f.statut === 'litige' ? (
                           <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={(e) => removeLitige(f, e)} title="Retirer le litige">
                             <RotateCcw className="h-3.5 w-3.5" />
                           </Button>
@@ -344,7 +350,7 @@ export default function Creances() {
                               <XOctagon className="h-3.5 w-3.5" />
                             </Button>
                           </>
-                        )}
+                        ))}
                       </div>
                     </td>
                   </tr>
@@ -392,7 +398,7 @@ export default function Creances() {
                       <span className="font-medium">{TYPE_ACTION_LABELS[a.type_action] || a.type_action}</span>
                       <div className="flex items-center gap-2">
                         <Badge variant={a.statut === 'fait' ? 'default' : 'secondary'}>{STATUT_LABELS[a.statut] || a.statut}</Badge>
-                        {a.statut === 'fait' && (
+                        {a.statut === 'fait' && canWrite && (
                           <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => reopenAction(a.id)} title="Réouvrir">
                             <Undo2 className="h-3.5 w-3.5" />
                           </Button>

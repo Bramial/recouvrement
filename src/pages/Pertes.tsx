@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { useCountryFilter } from '@/hooks/useCountryFilter';
 import { CountryFilter } from '@/components/CountryFilter';
+import { useAuth } from '@/hooks/useAuth';
 
 interface FacturePerte {
   id: string;
@@ -33,6 +34,7 @@ export default function Pertes() {
   const [search, setSearch] = useState('');
   const { country } = useCountryFilter();
   const navigate = useNavigate();
+  const { canWrite } = useAuth();
 
   useEffect(() => {
     const load = async () => {
@@ -117,9 +119,11 @@ export default function Pertes() {
                     </Badge>
                   </td>
                   <td className="p-3 text-center">
-                    <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => restaurer(f)} title="Restaurer">
-                      <RotateCcw className="h-3.5 w-3.5" />
-                    </Button>
+                    {canWrite && (
+                      <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => restaurer(f)} title="Restaurer">
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ))}

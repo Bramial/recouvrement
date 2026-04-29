@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ArrowLeft, Save, XOctagon, RotateCcw, ChevronDown, ChevronRight, Undo2, Scale, ShieldCheck, Plus, CheckCircle, X, Paperclip, Download, Trash2, Upload } from 'lucide-react';
 import type { FileObject } from '@supabase/storage-js';
 import { toast } from 'sonner';
+import { useAuth } from '@/hooks/useAuth';
 
 interface Client {
   id: string; code_client: string; nom: string; email: string | null;
@@ -70,6 +71,7 @@ const STATUT_META: Record<string, { label: string; variant: 'default' | 'seconda
 export default function ClientDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { canWrite } = useAuth();
   const [client, setClient] = useState<Client | null>(null);
   const [actions, setActions] = useState<Action[]>([]);
   const [email, setEmail] = useState('');
@@ -431,26 +433,28 @@ export default function ClientDetail() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Email</Label>
-              <Input value={email} onChange={(e) => setEmail(e.target.value)} />
+              <Input value={email} onChange={(e) => setEmail(e.target.value)} disabled={!canWrite} />
             </div>
             <div className="space-y-2">
               <Label>Téléphone</Label>
-              <Input value={telephone} onChange={(e) => setTelephone(e.target.value)} />
+              <Input value={telephone} onChange={(e) => setTelephone(e.target.value)} disabled={!canWrite} />
             </div>
             <div className="space-y-2">
               <Label>Conditions paiement</Label>
-              <Input value={conditions} onChange={(e) => setConditions(e.target.value)} />
+              <Input value={conditions} onChange={(e) => setConditions(e.target.value)} disabled={!canWrite} />
             </div>
             <div className="flex items-center gap-3 pt-6">
-              <Switch checked={exclusion} onCheckedChange={setExclusion} />
+              <Switch checked={exclusion} onCheckedChange={setExclusion} disabled={!canWrite} />
               <Label>Exclure des relances</Label>
             </div>
             <div className="flex items-center gap-3 pt-6">
-              <Switch checked={clientInterne} onCheckedChange={setClientInterne} />
+              <Switch checked={clientInterne} onCheckedChange={setClientInterne} disabled={!canWrite} />
               <Label>Client interne</Label>
             </div>
           </div>
-          <Button onClick={handleSave} disabled={saving}><Save className="h-4 w-4 mr-1" /> Enregistrer</Button>
+          {canWrite && (
+            <Button onClick={handleSave} disabled={saving}><Save className="h-4 w-4 mr-1" /> Enregistrer</Button>
+          )}
         </CardContent>
       </Card>
 
@@ -498,7 +502,12 @@ export default function ClientDetail() {
                   <td className="p-3">{f.date_echeance}</td>
                   <td className="p-3 text-center">
                     <div className="flex items-center justify-center gap-1">
-                    {f.statut === 'retention_dgd' ? (
+                    {showPertes && (
+                      <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => openDocumentsModal(f)} title="Pièces jointes">
+                        <Paperclip className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                    {canWrite && (f.statut === 'retention_dgd' ? (
                       <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => removeDgd(f)} title="Retirer la rétention DGD">
                         <RotateCcw className="h-3.5 w-3.5" />
                       </Button>
@@ -507,14 +516,9 @@ export default function ClientDetail() {
                         <RotateCcw className="h-3.5 w-3.5" />
                       </Button>
                     ) : showPertes ? (
-                      <>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => openDocumentsModal(f)} title="Pièces jointes">
-                          <Paperclip className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => perteFacture(f, false)} title="Restaurer">
-                          <RotateCcw className="h-3.5 w-3.5" />
-                        </Button>
-                      </>
+                      <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => perteFacture(f, false)} title="Restaurer">
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      </Button>
                     ) : (f.type_document === 'FACT' || f.type_document === 'NDEB') ? (
                       <>
                         <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => { setDgdModal(f); setDgdDate(''); }} title="Rétention DGD">
@@ -527,7 +531,7 @@ export default function ClientDetail() {
                           <XOctagon className="h-3.5 w-3.5" />
                         </Button>
                       </>
-                    ) : null}
+                    ) : null)}
                     </div>
                   </td>
                 </tr>
@@ -652,9 +656,11 @@ export default function ClientDetail() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">Historique des relances ({actions.length})</CardTitle>
-            <Button size="sm" variant="outline" className="gap-1" onClick={() => { setManualActionModal(true); setManualDate(new Date().toISOString().split('T')[0]); }}>
-              <Plus className="h-3.5 w-3.5" /> Ajouter une action
-            </Button>
+            {canWrite && (
+              <Button size="sm" variant="outline" className="gap-1" onClick={() => { setManualActionModal(true); setManualDate(new Date().toISOString().split('T')[0]); }}>
+                <Plus className="h-3.5 w-3.5" /> Ajouter une action
+              </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -678,7 +684,7 @@ export default function ClientDetail() {
                           <span className="text-xs text-muted-foreground">{displayDate}</span>
                           <span className="font-medium text-sm">{meta.label}</span>
                           <Badge variant={statut.variant}>{statut.label}</Badge>
-                          {a.statut === 'a_faire' && (
+                          {canWrite && a.statut === 'a_faire' && (
                             <>
                               <Button size="sm" variant="ghost" className="h-6 px-2 text-xs gap-1" onClick={() => markActionDone(a.id)}>
                                 <CheckCircle className="h-3 w-3" /> Fait
@@ -688,12 +694,12 @@ export default function ClientDetail() {
                               </Button>
                             </>
                           )}
-                          {a.statut === 'fait' && (
+                          {canWrite && a.statut === 'fait' && (
                             <Button size="sm" variant="ghost" className="h-6 px-2 text-xs gap-1" onClick={() => reopenAction(a.id)}>
                               <Undo2 className="h-3 w-3" /> Réouvrir
                             </Button>
                           )}
-                          {a.statut === 'ignore' && (
+                          {canWrite && a.statut === 'ignore' && (
                             <Button size="sm" variant="ghost" className="h-6 px-2 text-xs gap-1" onClick={() => reopenAction(a.id)}>
                               <Undo2 className="h-3 w-3" /> Réouvrir
                             </Button>
@@ -874,38 +880,40 @@ export default function ClientDetail() {
               Facture <span className="font-medium text-foreground">{documentsModal.numero_facture}</span>
             </p>
 
-            <div
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOver(false);
-                if (e.dataTransfer.files.length > 0) uploadDocuments(e.dataTransfer.files);
-              }}
-              className={`border-2 border-dashed rounded-md p-6 text-center text-sm transition-colors ${dragOver ? 'border-primary bg-primary/5' : 'border-border'}`}
-            >
-              <Upload className="h-5 w-5 mx-auto mb-2 text-muted-foreground" />
-              <p className="text-muted-foreground mb-2">Glissez-déposez ici ou</p>
-              <label className="inline-block">
-                <input
-                  type="file"
-                  multiple
-                  accept=".pdf,image/png,image/jpeg,image/webp,image/heic"
-                  className="hidden"
-                  onChange={(e) => {
-                    if (e.target.files && e.target.files.length > 0) {
-                      uploadDocuments(e.target.files);
-                      e.target.value = '';
-                    }
-                  }}
-                />
-                <span className="inline-flex h-8 px-3 items-center text-xs font-medium rounded-md border bg-background hover:bg-muted cursor-pointer">
-                  Choisir des fichiers
-                </span>
-              </label>
-              <p className="text-xs text-muted-foreground mt-2">PDF, PNG, JPG, WebP, HEIC — 10 MB max</p>
-              {uploading && <p className="text-xs text-muted-foreground mt-2">Upload en cours...</p>}
-            </div>
+            {canWrite && (
+              <div
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOver(false);
+                  if (e.dataTransfer.files.length > 0) uploadDocuments(e.dataTransfer.files);
+                }}
+                className={`border-2 border-dashed rounded-md p-6 text-center text-sm transition-colors ${dragOver ? 'border-primary bg-primary/5' : 'border-border'}`}
+              >
+                <Upload className="h-5 w-5 mx-auto mb-2 text-muted-foreground" />
+                <p className="text-muted-foreground mb-2">Glissez-déposez ici ou</p>
+                <label className="inline-block">
+                  <input
+                    type="file"
+                    multiple
+                    accept=".pdf,image/png,image/jpeg,image/webp,image/heic"
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files.length > 0) {
+                        uploadDocuments(e.target.files);
+                        e.target.value = '';
+                      }
+                    }}
+                  />
+                  <span className="inline-flex h-8 px-3 items-center text-xs font-medium rounded-md border bg-background hover:bg-muted cursor-pointer">
+                    Choisir des fichiers
+                  </span>
+                </label>
+                <p className="text-xs text-muted-foreground mt-2">PDF, PNG, JPG, WebP, HEIC — 10 MB max</p>
+                {uploading && <p className="text-xs text-muted-foreground mt-2">Upload en cours...</p>}
+              </div>
+            )}
 
             <div className="overflow-y-auto mt-4 space-y-2">
               {documentsLoading ? (
@@ -926,9 +934,11 @@ export default function ClientDetail() {
                       <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => downloadDocument(doc.name)} title="Télécharger">
                         <Download className="h-4 w-4" />
                       </Button>
-                      <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => deleteDocument(doc.name)} title="Supprimer">
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {canWrite && (
+                        <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => deleteDocument(doc.name)} title="Supprimer">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 );

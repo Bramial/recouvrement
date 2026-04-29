@@ -6,6 +6,8 @@ import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { CountryFilterProvider } from "@/hooks/useCountryFilter";
 import AppLayout from "@/components/AppLayout";
 import Login from "@/pages/Login";
+import ResetPasswordRequest from "@/pages/ResetPasswordRequest";
+import UpdatePassword from "@/pages/UpdatePassword";
 import RapportDuJour from "@/pages/RapportDuJour";
 import Creances from "@/pages/Creances";
 import Clients from "@/pages/Clients";
@@ -13,7 +15,9 @@ import ClientDetail from "@/pages/ClientDetail";
 import Historique from "@/pages/Historique";
 import FacturesReglees from "@/pages/FacturesReglees";
 import Pertes from "@/pages/Pertes";
+import UserManagement from "@/pages/UserManagement";
 import NotFound from "@/pages/NotFound";
+import { RequireAdmin } from "@/components/RequireAdmin";
 
 const queryClient = new QueryClient();
 
@@ -37,6 +41,7 @@ function ProtectedRoutes() {
         <Route path="/factures-reglees" element={<FacturesReglees />} />
         <Route path="/pertes" element={<Pertes />} />
         <Route path="/historique" element={<Historique />} />
+        <Route path="/users" element={<RequireAdmin><UserManagement /></RequireAdmin>} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AppLayout>
@@ -52,6 +57,9 @@ const App = () => (
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/forgot-password" element={<ResetPasswordRequest />} />
+            <Route path="/update-password" element={<UpdatePassword />} />
+            <Route path="/set-password" element={<UpdatePassword />} />
             <Route path="/*" element={<ProtectedRoutes />} />
           </Routes>
         </BrowserRouter>

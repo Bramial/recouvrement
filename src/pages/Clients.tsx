@@ -13,6 +13,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useCountryFilter } from '@/hooks/useCountryFilter';
 import { CountryFilter } from '@/components/CountryFilter';
+import { useAuth } from '@/hooks/useAuth';
 
 interface Client {
   id: string;
@@ -41,6 +42,7 @@ export default function Clients() {
   const [showSoldes, setShowSoldes] = useState(false);
   const navigate = useNavigate();
   const { country } = useCountryFilter();
+  const { canWrite } = useAuth();
 
   const fetchClients = async () => {
     const maxMois = await getMaxMoisExtraction();
@@ -233,7 +235,7 @@ export default function Clients() {
                   </td>
                   <td className="p-3 text-muted-foreground">{c.conditions_paiement}</td>
                   <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
-                    <Switch checked={c.exclusion_relance} onCheckedChange={() => toggleExclusion(c)} />
+                    <Switch checked={c.exclusion_relance} onCheckedChange={() => toggleExclusion(c)} disabled={!canWrite} />
                   </td>
                 </tr>
               ))}

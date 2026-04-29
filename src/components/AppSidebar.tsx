@@ -1,4 +1,4 @@
-import { FileText, Users, Clock, BarChart3, LogOut, CheckCircle } from 'lucide-react';
+import { FileText, Users, Clock, BarChart3, LogOut, CheckCircle, Shield } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/hooks/useAuth';
 import {
@@ -25,7 +25,8 @@ const navItems = [
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === 'collapsed';
-  const { signOut } = useAuth();
+  const { signOut, isAdmin } = useAuth();
+  const items = isAdmin ? [...navItems, { title: 'Utilisateurs', url: '/users', icon: Shield }] : navItems;
 
   return (
     <Sidebar collapsible="icon">
@@ -39,7 +40,7 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => (
+              {items.map((item) => (
                 <SidebarMenuItem key={item.url}>
                   <SidebarMenuButton asChild>
                     <NavLink to={item.url} end={item.url === '/'} className="hover:bg-sidebar-accent/50" activeClassName="bg-sidebar-accent text-sidebar-accent-foreground font-medium">
