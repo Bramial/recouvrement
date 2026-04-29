@@ -154,9 +154,10 @@ export default function ClientDetail() {
     }
     return rows.sort((a, b) => new Date(b.sortDate).getTime() - new Date(a.sortDate).getTime());
   })();
-  // Solde net = somme des solde_restant des FACT/NDEB uniquement (les REC/NCRE sont déjà absorbés dans ces soldes)
+  // Solde net = somme des solde_restant des FACT/NDEB encore actives (perte exclue, REC/NCRE
+  // déjà absorbés dans ces soldes).
   const soldeNet = allFactures
-    .filter(f => f.type_document === 'FACT' || f.type_document === 'NDEB')
+    .filter(f => (f.type_document === 'FACT' || f.type_document === 'NDEB') && f.statut !== 'perte' && f.statut !== 'pertes_profits')
     .reduce((s, f) => s + Number(f.solde_restant ?? f.montant ?? 0), 0);
 
   const perteFacture = async (facture: Facture, perte: boolean) => {
@@ -179,6 +180,12 @@ export default function ClientDetail() {
       });
       if (error) toast.error("Statut mis à jour mais l'audit n'a pas pu être enregistré");
       else await reloadActions();
+    } else if (!perte) {
+      // Restauration : supprimer l'entrée d'audit pour qu'elle disparaisse de l'historique
+      await supabase.from('actions_relance').delete()
+        .eq('facture_id', facture.id)
+        .eq('type_action', 'passage_perte');
+      await reloadActions();
     }
 
     toast.success(perte ? `Facture ${facture.numero_facture} passée en perte` : `Facture ${facture.numero_facture} restaurée`);
