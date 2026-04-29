@@ -47,9 +47,9 @@ export default function Clients() {
     let clientsQuery = supabase.from('clients').select('*');
     if (country !== 'all') clientsQuery = clientsQuery.ilike('code_client', `${country}_%`);
     const { data: clientsData } = await clientsQuery;
+    // Tous types confondus en statut='en_cours' — NCRE/REC négatifs réduisent le reste dû
     let facturesQuery = supabase.from('factures').select('client_id, solde_restant, montant, type_document, date_echeance')
-      .in('statut', ['en_cours', 'retention_dgd'])
-      .in('type_document', ['FACT', 'NDEB']);
+      .eq('statut', 'en_cours');
     if (maxMois) facturesQuery = facturesQuery.eq('mois_extraction', maxMois);
     const { data: facturesData } = await facturesQuery;
 
@@ -130,7 +130,7 @@ export default function Clients() {
 
   const getCountryFlag = (codeClient: string) => codeClient.startsWith('FR_') ? '🇫🇷' : codeClient.startsWith('PT_') ? '🇵🇹' : '';
 
-  const formatCurrency = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: 0 }).format(n);
+  const formatCurrency = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 
   if (loading) return <div className="flex items-center justify-center h-64 text-muted-foreground">Chargement...</div>;
 
