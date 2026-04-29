@@ -10,7 +10,8 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Save, XOctagon, RotateCcw, ChevronDown, ChevronRight, Undo2, Scale, ShieldCheck, Plus, CheckCircle, X } from 'lucide-react';
+import { ArrowLeft, Save, XOctagon, RotateCcw, ChevronDown, ChevronRight, Undo2, Scale, ShieldCheck, Plus, CheckCircle, X, Paperclip, Download, Trash2, Upload } from 'lucide-react';
+import type { FileObject } from '@supabase/storage-js';
 import { toast } from 'sonner';
 
 interface Client {
@@ -83,6 +84,11 @@ export default function ClientDetail() {
   const [savingLitigeNote, setSavingLitigeNote] = useState(false);
   const [dgdModal, setDgdModal] = useState<Facture | null>(null);
   const [dgdDate, setDgdDate] = useState('');
+  const [documentsModal, setDocumentsModal] = useState<Facture | null>(null);
+  const [documents, setDocuments] = useState<FileObject[]>([]);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const [manualActionModal, setManualActionModal] = useState(false);
   const [manualMode, setManualMode] = useState<'past' | 'scheduled'>('past');
   const [manualType, setManualType] = useState('appel_manuel');
@@ -210,6 +216,94 @@ export default function ClientDetail() {
     await supabase.from('factures').update({ statut: 'en_cours', date_reception_dgd: null }).eq('id', facture.id);
     setAllFactures(prev => prev.map(f => f.id === facture.id ? { ...f, statut: 'en_cours', date_reception_dgd: null } : f));
     toast.success(`Rétention DGD retirée pour ${facture.numero_facture}`);
+  };
+
+  const loadDocuments = async (factureId: string) => {
+    setDocumentsLoading(true);
+    const { data, error } = await supabase.storage
+      .from('pertes_documents')
+      .list(factureId, { sortBy: { column: 'created_at', order: 'desc' } });
+    if (error) toast.error('Erreur de chargement des pièces jointes');
+    setDocuments(data || []);
+    setDocumentsLoading(false);
+  };
+
+  const openDocumentsModal = (facture: Facture) => {
+    setDocumentsModal(facture);
+    setDocuments([]);
+    loadDocuments(facture.id);
+  };
+
+  const slugifyFilename = (name: string) => {
+    const dot = name.lastIndexOf('.');
+    const base = dot > 0 ? name.slice(0, dot) : name;
+    const ext = dot > 0 ? name.slice(dot) : '';
+    const cleaned = base
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-zA-Z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    return `${cleaned || 'fichier'}${ext.toLowerCase()}`;
+  };
+
+  const parseFileName = (storedName: string) => storedName.replace(/^\d+-/, '');
+
+  const uploadDocuments = async (fileList: FileList | File[]) => {
+    if (!documentsModal) return;
+    const factureId = documentsModal.id;
+    setUploading(true);
+    const allowedMimes = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/heic'];
+    const maxBytes = 10 * 1024 * 1024;
+    let okCount = 0;
+    for (const file of Array.from(fileList)) {
+      if (!allowedMimes.includes(file.type)) {
+        toast.error(`${file.name} : type non autorisé (PDF/images uniquement)`);
+        continue;
+      }
+      if (file.size > maxBytes) {
+        toast.error(`${file.name} : trop volumineux (max 10 MB)`);
+        continue;
+      }
+      const path = `${factureId}/${Date.now()}-${slugifyFilename(file.name)}`;
+      const { error } = await supabase.storage.from('pertes_documents').upload(path, file);
+      if (error) {
+        toast.error(`${file.name} : ${error.message}`);
+      } else {
+        okCount++;
+      }
+    }
+    if (okCount > 0) toast.success(`${okCount} fichier${okCount > 1 ? 's ajoutés' : ' ajouté'}`);
+    setUploading(false);
+    await loadDocuments(factureId);
+  };
+
+  const downloadDocument = async (storedName: string) => {
+    if (!documentsModal) return;
+    const path = `${documentsModal.id}/${storedName}`;
+    const { data, error } = await supabase.storage.from('pertes_documents').createSignedUrl(path, 3600);
+    if (error || !data?.signedUrl) {
+      toast.error('Impossible de générer le lien de téléchargement');
+      return;
+    }
+    window.open(data.signedUrl, '_blank');
+  };
+
+  const deleteDocument = async (storedName: string) => {
+    if (!documentsModal) return;
+    if (!confirm(`Supprimer ${parseFileName(storedName)} ?`)) return;
+    const path = `${documentsModal.id}/${storedName}`;
+    const { error } = await supabase.storage.from('pertes_documents').remove([path]);
+    if (error) {
+      toast.error('Erreur lors de la suppression');
+      return;
+    }
+    toast.success('Pièce supprimée');
+    await loadDocuments(documentsModal.id);
+  };
+
+  const formatBytes = (n: number) => {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   const handleSave = async () => {
@@ -375,9 +469,14 @@ export default function ClientDetail() {
                         <RotateCcw className="h-3.5 w-3.5" />
                       </Button>
                     ) : showPertes ? (
-                      <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => perteFacture(f, false)}>
-                        <RotateCcw className="h-3.5 w-3.5" />
-                      </Button>
+                      <>
+                        <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => openDocumentsModal(f)} title="Pièces jointes">
+                          <Paperclip className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => perteFacture(f, false)} title="Restaurer">
+                          <RotateCcw className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
                     ) : (
                       <>
                         <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => { setDgdModal(f); setDgdDate(''); }} title="Rétention DGD">
@@ -690,6 +789,81 @@ export default function ClientDetail() {
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setLitigeModal(null)}>Annuler</Button>
               <Button variant="destructive" onClick={handleLitige} disabled={!litigeNote.trim()}>Confirmer le litige</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {documentsModal && (
+        <div className="fixed inset-0 bg-foreground/50 flex items-center justify-center z-50 p-4" onClick={() => setDocumentsModal(null)}>
+          <div className="bg-card rounded-lg p-6 w-full max-w-lg max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold">Pièces jointes</h3>
+              <Button size="sm" variant="ghost" onClick={() => setDocumentsModal(null)}><X className="h-4 w-4" /></Button>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              Facture <span className="font-medium text-foreground">{documentsModal.numero_facture}</span>
+            </p>
+
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                if (e.dataTransfer.files.length > 0) uploadDocuments(e.dataTransfer.files);
+              }}
+              className={`border-2 border-dashed rounded-md p-6 text-center text-sm transition-colors ${dragOver ? 'border-primary bg-primary/5' : 'border-border'}`}
+            >
+              <Upload className="h-5 w-5 mx-auto mb-2 text-muted-foreground" />
+              <p className="text-muted-foreground mb-2">Glissez-déposez ici ou</p>
+              <label className="inline-block">
+                <input
+                  type="file"
+                  multiple
+                  accept=".pdf,image/png,image/jpeg,image/webp,image/heic"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      uploadDocuments(e.target.files);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+                <span className="inline-flex h-8 px-3 items-center text-xs font-medium rounded-md border bg-background hover:bg-muted cursor-pointer">
+                  Choisir des fichiers
+                </span>
+              </label>
+              <p className="text-xs text-muted-foreground mt-2">PDF, PNG, JPG, WebP, HEIC — 10 MB max</p>
+              {uploading && <p className="text-xs text-muted-foreground mt-2">Upload en cours...</p>}
+            </div>
+
+            <div className="overflow-y-auto mt-4 space-y-2">
+              {documentsLoading ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">Chargement...</p>
+              ) : documents.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">Aucune pièce jointe.</p>
+              ) : documents.map(doc => {
+                const displayName = parseFileName(doc.name);
+                const size = doc.metadata?.size ?? 0;
+                const date = doc.created_at ? new Date(doc.created_at).toLocaleDateString('fr-FR') : '—';
+                return (
+                  <div key={doc.id ?? doc.name} className="border rounded-md p-3 flex items-center justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">{displayName}</p>
+                      <p className="text-xs text-muted-foreground">{date} · {formatBytes(size)}</p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => downloadDocument(doc.name)} title="Télécharger">
+                        <Download className="h-4 w-4" />
+                      </Button>
+                      <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => deleteDocument(doc.name)} title="Supprimer">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
