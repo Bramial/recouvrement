@@ -1,4 +1,5 @@
-import { FileText, Users, Clock, BarChart3, LogOut, CheckCircle, Shield, Mail } from 'lucide-react';
+import { FileText, Users, Clock, BarChart3, LogOut, CheckCircle, Settings, Mail, Shield } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/hooks/useAuth';
 import {
@@ -13,6 +14,12 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 const navItems = [
   { title: 'Rapport du jour', url: '/', icon: FileText },
@@ -20,14 +27,12 @@ const navItems = [
   { title: 'Clients', url: '/clients', icon: Users },
   { title: 'Factures réglées', url: '/factures-reglees', icon: CheckCircle },
   { title: 'Historique', url: '/historique', icon: Clock },
-  { title: 'Templates', url: '/templates', icon: Mail },
 ];
 
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === 'collapsed';
   const { signOut, isAdmin } = useAuth();
-  const items = isAdmin ? [...navItems, { title: 'Utilisateurs', url: '/users', icon: Shield }] : navItems;
 
   return (
     <Sidebar collapsible="icon">
@@ -41,7 +46,7 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {items.map((item) => (
+              {navItems.map((item) => (
                 <SidebarMenuItem key={item.url}>
                   <SidebarMenuButton asChild>
                     <NavLink to={item.url} end={item.url === '/'} className="hover:bg-sidebar-accent/50" activeClassName="bg-sidebar-accent text-sidebar-accent-foreground font-medium">
@@ -55,7 +60,33 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="p-2">
+      <SidebarFooter className="p-2 space-y-1">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size={collapsed ? 'icon' : 'default'}
+              className="w-full text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50 justify-start"
+            >
+              <Settings className="h-4 w-4" />
+              {!collapsed && <span className="ml-2">Admin</span>}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="start" className="w-48">
+            <DropdownMenuItem asChild>
+              <Link to="/templates" className="cursor-pointer">
+                <Mail className="h-4 w-4 mr-2" /> Templates
+              </Link>
+            </DropdownMenuItem>
+            {isAdmin && (
+              <DropdownMenuItem asChild>
+                <Link to="/users" className="cursor-pointer">
+                  <Shield className="h-4 w-4 mr-2" /> Utilisateurs
+                </Link>
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button variant="ghost" size={collapsed ? 'icon' : 'default'} onClick={signOut} className="w-full text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50 justify-start">
           <LogOut className="h-4 w-4" />
           {!collapsed && <span className="ml-2">Déconnexion</span>}
