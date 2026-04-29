@@ -51,6 +51,7 @@ const TYPE_ACTION_META: Record<string, { label: string; icon: string }> = {
   mise_en_demeure_manuel: { label: 'Mise en demeure', icon: '📄' },
   autre_manuel: { label: 'Autre', icon: '📋' },
   passage_perte: { label: 'Passage en perte', icon: '🛑' },
+  annulation_avoir: { label: 'Avoir annulé', icon: '🚫' },
 };
 
 const MANUAL_ACTION_TYPES = [
@@ -152,7 +153,7 @@ export default function ClientDetail() {
       rows.push({ kind: 'payment_detected', facture: f, sortDate: detectedAt, detectedAt });
     }
     for (const a of actions) {
-      if (a.type_action !== 'passage_perte') continue;
+      if (a.type_action !== 'passage_perte' && a.type_action !== 'annulation_avoir') continue;
       const date = a.date_executee || a.date_prevue;
       if (!date) continue;
       rows.push({ kind: 'passage_perte', action: a, sortDate: date, date });
@@ -166,6 +167,7 @@ export default function ClientDetail() {
     .reduce((s, f) => s + Number(f.solde_restant ?? f.montant ?? 0), 0);
 
   const perteFacture = async (facture: Facture, perte: boolean) => {
+    const isCredit = facture.type_document === 'NCRE' || facture.type_document === 'REC';
     const newStatut = perte ? 'perte' : 'en_cours';
     await supabase.from('factures').update({ statut: newStatut }).eq('id', facture.id);
     setAllFactures(prev => prev.map(f => f.id === facture.id ? { ...f, statut: newStatut } : f));
@@ -173,15 +175,19 @@ export default function ClientDetail() {
     if (perte && client) {
       const today = new Date().toISOString().split('T')[0];
       const montant = Number(facture.solde_restant ?? facture.montant ?? 0);
-      const formattedMontant = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: 0 }).format(montant);
+      const formattedMontant = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(montant);
+      const auditType = isCredit ? 'annulation_avoir' : 'passage_perte';
+      const noteText = isCredit
+        ? `${facture.type_document === 'NCRE' ? 'Avoir' : 'Acompte'} ${facture.numero_facture} annulé — ${formattedMontant}`
+        : `Facture ${facture.numero_facture} passée en perte — ${formattedMontant}`;
       const { error } = await supabase.from('actions_relance').insert({
         client_id: client.id,
         facture_id: facture.id,
-        type_action: 'passage_perte',
+        type_action: auditType,
         date_prevue: today,
         date_executee: today,
         statut: 'fait',
-        notes: `Facture ${facture.numero_facture} passée en perte — ${formattedMontant}`,
+        notes: noteText,
       });
       if (error) toast.error("Statut mis à jour mais l'audit n'a pas pu être enregistré");
       else await reloadActions();
@@ -189,11 +195,15 @@ export default function ClientDetail() {
       // Restauration : supprimer l'entrée d'audit pour qu'elle disparaisse de l'historique
       await supabase.from('actions_relance').delete()
         .eq('facture_id', facture.id)
-        .eq('type_action', 'passage_perte');
+        .in('type_action', ['passage_perte', 'annulation_avoir']);
       await reloadActions();
     }
 
-    toast.success(perte ? `Facture ${facture.numero_facture} passée en perte` : `Facture ${facture.numero_facture} restaurée`);
+    if (perte) {
+      toast.success(isCredit ? `${facture.type_document === 'NCRE' ? 'Avoir' : 'Acompte'} ${facture.numero_facture} annulé` : `Facture ${facture.numero_facture} passée en perte`);
+    } else {
+      toast.success(isCredit ? `${facture.type_document === 'NCRE' ? 'Avoir' : 'Acompte'} ${facture.numero_facture} restauré` : `Facture ${facture.numero_facture} restaurée`);
+    }
   };
 
   const handleLitige = async () => {
@@ -531,6 +541,10 @@ export default function ClientDetail() {
                           <XOctagon className="h-3.5 w-3.5" />
                         </Button>
                       </>
+                    ) : (f.type_document === 'NCRE' || f.type_document === 'REC') ? (
+                      <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => perteFacture(f, true)} title={f.type_document === 'NCRE' ? "Annuler l'avoir" : "Annuler l'acompte"}>
+                        <XOctagon className="h-3.5 w-3.5" />
+                      </Button>
                     ) : null)}
                     </div>
                   </td>
@@ -585,18 +599,27 @@ export default function ClientDetail() {
                       }
                       if (row.kind === 'passage_perte') {
                         const a = row.action;
+                        const isAnnulation = a.type_action === 'annulation_avoir';
                         const numero = a.factures?.numero_facture ?? '—';
                         const facture = a.facture_id ? allFactures.find(f => f.id === a.facture_id) : undefined;
                         const montant = facture?.montant ?? null;
+                        const label = isAnnulation
+                          ? (facture?.type_document === 'REC' ? 'Acompte annulé' : 'Avoir annulé')
+                          : 'Passage en perte';
+                        const bgClass = isAnnulation ? 'bg-orange-50/40' : 'bg-red-50/40';
+                        const badgeClass = isAnnulation
+                          ? 'bg-orange-100 text-orange-700 border-orange-200'
+                          : 'bg-red-100 text-red-700 border-red-200';
+                        const montantClass = isAnnulation ? 'text-orange-700' : 'text-red-700';
                         return (
-                          <tr key={`perte-${a.id}`} className="border-b bg-red-50/40">
+                          <tr key={`perte-${a.id}`} className={`border-b ${bgClass}`}>
                             <td className="p-3 font-medium">{numero}</td>
                             <td className="p-3">
-                              <Badge variant="outline" className="text-xs bg-red-100 text-red-700 border-red-200">
-                                Passage en perte
+                              <Badge variant="outline" className={`text-xs ${badgeClass}`}>
+                                {label}
                               </Badge>
                             </td>
-                            <td className="p-3 text-right text-red-700">{montant != null ? formatCurrency(montant) : '—'}</td>
+                            <td className={`p-3 text-right ${montantClass}`}>{montant != null ? formatCurrency(montant) : '—'}</td>
                             <td className="p-3 text-right text-muted-foreground">—</td>
                             <td className="p-3 text-muted-foreground" title={a.notes ?? undefined}>{row.date}</td>
                           </tr>
