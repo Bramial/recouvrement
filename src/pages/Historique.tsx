@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Badge } from '@/components/ui/badge';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Upload, Trash2 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { toast } from 'sonner';
 
 interface Rapport {
   id: string; date_rapport: string; total_creances: number | null;
@@ -17,10 +19,103 @@ interface Import {
   id: string; nom_fichier: string; source: string | null; mois: string;
   date_import: string; nb_lignes_brutes: number | null;
   nb_lignes_parsees: number | null; statut: string;
+  emitido_em: string | null;
+  storage_path: string | null;
 }
 
 function formatCurrency(n: number) {
   return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: 0 }).format(n);
+}
+
+function slugifyFilename(name: string) {
+  const dot = name.lastIndexOf('.');
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  const cleaned = base
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${cleaned || 'fichier'}${ext.toLowerCase()}`;
+}
+
+function detectSource(name: string): 'FR' | 'PT' | null {
+  const lower = name.toLowerCase();
+  if (/portu/.test(lower)) return 'PT';
+  if (/fran[cç]/.test(lower)) return 'FR';
+  if (/(^|[^a-z])pt([^a-z]|$)/.test(lower)) return 'PT';
+  if (/(^|[^a-z])fr([^a-z]|$)/.test(lower)) return 'FR';
+  return null;
+}
+
+function parseAnyDate(s: string): Date | null {
+  const iso = s.match(/(\d{4})[./-](\d{1,2})[./-](\d{1,2})/);
+  if (iso) {
+    const d = new Date(Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])));
+    if (!isNaN(d.getTime())) return d;
+  }
+  const dm = s.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/);
+  if (dm) {
+    let year = Number(dm[3]);
+    if (year < 100) year += 2000;
+    const month = Number(dm[2]);
+    const day = Number(dm[1]);
+    const d = new Date(Date.UTC(year, month - 1, day));
+    if (!isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+
+function excelSerialToDate(serial: number): Date | null {
+  if (!Number.isFinite(serial) || serial < 1 || serial > 100000) return null;
+  const ms = Math.round((serial - 25569) * 86400 * 1000);
+  const d = new Date(ms);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function toIsoDate(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function formatDateFR(iso: string): string {
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+async function extractEmitidoEm(file: File): Promise<Date | null> {
+  const XLSX = await import('xlsx');
+  const buffer = await file.arrayBuffer();
+  const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
+  const labelRe = /emitido|emiss[aã]o|data\s+(de\s+)?emiss[aã]o|pendentes\s+em/i;
+  const debugRows: unknown[][] = [];
+
+  const dateFromCell = (cell: unknown): Date | null => {
+    if (cell instanceof Date && !isNaN(cell.getTime())) return cell;
+    if (typeof cell === 'number') return excelSerialToDate(cell);
+    if (typeof cell === 'string') return parseAnyDate(cell);
+    return null;
+  };
+
+  for (const sheetName of wb.SheetNames) {
+    const sheet = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null });
+    for (let r = 0; r < Math.min(rows.length, 50); r++) {
+      const row = rows[r];
+      if (!Array.isArray(row)) continue;
+      debugRows.push(row);
+      const hasLabel = row.some((c) => typeof c === 'string' && labelRe.test(c));
+      if (!hasLabel) continue;
+      for (const cell of row) {
+        const d = dateFromCell(cell);
+        if (d) return d;
+      }
+    }
+  }
+
+  console.warn('[extractEmitidoEm] aucun champ emitido/emissão détecté. Premières lignes scannées:', debugRows.slice(0, 15));
+  return null;
 }
 
 export default function Historique() {
@@ -28,6 +123,8 @@ export default function Historique() {
   const [imports, setImports] = useState<Import[]>([]);
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     Promise.all([
@@ -45,6 +142,113 @@ export default function Historique() {
     creances: Number(r.total_creances) || 0,
     retard: Number(r.total_en_retard) || 0,
   }));
+
+  const handleUpload = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    setUploading(true);
+    const allowedExts = ['.xls', '.xlsx'];
+    const maxBytes = 20 * 1024 * 1024;
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    let okCount = 0;
+    const newImports: Import[] = [];
+    for (const file of Array.from(fileList)) {
+      const dot = file.name.lastIndexOf('.');
+      const ext = dot > 0 ? file.name.slice(dot).toLowerCase() : '';
+      if (!allowedExts.includes(ext)) {
+        toast.error(`${file.name} : format non supporté (.xls / .xlsx uniquement)`);
+        continue;
+      }
+      if (file.size > maxBytes) {
+        toast.error(`${file.name} : trop volumineux (max 20 MB)`);
+        continue;
+      }
+      let emitidoEm: Date | null = null;
+      try {
+        emitidoEm = await extractEmitidoEm(file);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'erreur inconnue';
+        toast.error(`${file.name} : lecture du fichier impossible (${msg})`);
+        continue;
+      }
+      if (!emitidoEm) {
+        toast.error(`${file.name} : champ "Emitido em" introuvable dans le fichier`);
+        continue;
+      }
+      const emitidoIso = toIsoDate(emitidoEm);
+
+      const detectedSource = detectSource(file.name);
+      let q = supabase
+        .from('imports')
+        .select('emitido_em, source, nom_fichier')
+        .not('emitido_em', 'is', null)
+        .order('emitido_em', { ascending: false })
+        .limit(1);
+      if (detectedSource) q = q.eq('source', detectedSource);
+      const { data: latestRows } = await q;
+      const latest = latestRows?.[0];
+      if (latest?.emitido_em && emitidoIso < latest.emitido_em) {
+        toast.error(
+          `${file.name} : "Emitido em" ${formatDateFR(emitidoIso)} antérieur au dernier import${detectedSource ? ` ${detectedSource}` : ''} (${formatDateFR(latest.emitido_em)})`
+        );
+        continue;
+      }
+
+      const uploadKey = `${Date.now()}-${slugifyFilename(file.name)}`;
+      const { data: uploaded, error: upErr } = await supabase.storage
+        .from('pendentes_imports')
+        .upload(uploadKey, file);
+      if (upErr || !uploaded) {
+        toast.error(`${file.name} : ${upErr?.message ?? 'upload échoué'}`);
+        continue;
+      }
+      const { data: row, error: dbErr } = await supabase
+        .from('imports')
+        .insert({
+          nom_fichier: file.name,
+          source: detectedSource,
+          mois: currentMonth,
+          statut: 'a_traiter',
+          emitido_em: emitidoIso,
+          storage_path: uploaded.path,
+        })
+        .select()
+        .single();
+      if (dbErr || !row) {
+        await supabase.storage.from('pendentes_imports').remove([uploaded.path]);
+        toast.error(`${file.name} : ${dbErr?.message ?? 'enregistrement échoué'}`);
+        continue;
+      }
+      okCount++;
+      newImports.push(row as unknown as Import);
+    }
+    if (okCount > 0) {
+      toast.success(`${okCount} fichier${okCount > 1 ? 's uploadés' : ' uploadé'} — à traiter`);
+      setImports((prev) => [...newImports, ...prev]);
+    }
+    setUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleDelete = async (imp: Import) => {
+    if (imp.statut !== 'a_traiter') return;
+    if (!confirm(`Supprimer ${imp.nom_fichier} ?`)) return;
+    if (imp.storage_path) {
+      const { error: rmErr } = await supabase.storage
+        .from('pendentes_imports')
+        .remove([imp.storage_path]);
+      if (rmErr) {
+        toast.error(`Suppression fichier : ${rmErr.message}`);
+        return;
+      }
+    }
+    const { error } = await supabase.from('imports').delete().eq('id', imp.id);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setImports((prev) => prev.filter((i) => i.id !== imp.id));
+    toast.success('Import supprimé');
+  };
 
   if (loading) return <div className="flex items-center justify-center h-64 text-muted-foreground">Chargement...</div>;
 
@@ -104,27 +308,68 @@ export default function Historique() {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Imports</CardTitle></CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <CardTitle className="text-base">Imports</CardTitle>
+          <div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              multiple
+              className="hidden"
+              onChange={(e) => handleUpload(e.target.files)}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={uploading}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload className="h-4 w-4 mr-2" />
+              {uploading ? 'Upload…' : 'Uploader pendentes (Excel)'}
+            </Button>
+          </div>
+        </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="border-b bg-muted/50">
               <th className="text-left p-3">Fichier</th><th className="text-left p-3">Source</th>
-              <th className="text-left p-3">Mois</th><th className="text-right p-3">Lignes</th>
+              <th className="text-left p-3">Mois</th>
+              <th className="text-right p-3">Lignes</th>
               <th className="text-center p-3">Statut</th><th className="text-left p-3">Date</th>
+              <th className="p-3 w-10"></th>
             </tr></thead>
             <tbody>
               {imports.map(i => (
                 <tr key={i.id} className="border-b">
                   <td className="p-3">{i.nom_fichier}</td>
-                  <td className="p-3"><Badge variant="secondary">{i.source}</Badge></td>
+                  <td className="p-3">{i.source ? <Badge variant="secondary">{i.source}</Badge> : <span className="text-muted-foreground">—</span>}</td>
                   <td className="p-3">{i.mois}</td>
-                  <td className="p-3 text-right">{i.nb_lignes_parsees}/{i.nb_lignes_brutes}</td>
+                  <td className="p-3 text-right">{i.nb_lignes_parsees ?? '—'}/{i.nb_lignes_brutes ?? '—'}</td>
                   <td className="p-3 text-center">
-                    <Badge className={i.statut === 'ok' ? 'bg-badge-success text-badge-success-foreground' : i.statut === 'erreur' ? 'bg-badge-danger text-badge-danger-foreground' : 'bg-badge-warning text-badge-warning-foreground'}>
-                      {i.statut}
+                    <Badge className={
+                      i.statut === 'ok' ? 'bg-badge-success text-badge-success-foreground' :
+                      i.statut === 'erreur' ? 'bg-badge-danger text-badge-danger-foreground' :
+                      i.statut === 'a_traiter' ? 'bg-badge-info text-badge-info-foreground' :
+                      'bg-badge-warning text-badge-warning-foreground'
+                    }>
+                      {i.statut === 'a_traiter' ? 'à traiter' : i.statut}
                     </Badge>
                   </td>
                   <td className="p-3 text-muted-foreground">{new Date(i.date_import).toLocaleDateString('fr-FR')}</td>
+                  <td className="p-3 text-right">
+                    {i.statut === 'a_traiter' && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleDelete(i)}
+                        title="Supprimer"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

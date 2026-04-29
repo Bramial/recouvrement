@@ -175,6 +175,7 @@ export type Database = {
       imports: {
         Row: {
           date_import: string | null
+          emitido_em: string | null
           erreurs: string | null
           id: string
           mois: string
@@ -183,9 +184,11 @@ export type Database = {
           nom_fichier: string
           source: string | null
           statut: string | null
+          storage_path: string | null
         }
         Insert: {
           date_import?: string | null
+          emitido_em?: string | null
           erreurs?: string | null
           id?: string
           mois: string
@@ -194,9 +197,11 @@ export type Database = {
           nom_fichier: string
           source?: string | null
           statut?: string | null
+          storage_path?: string | null
         }
         Update: {
           date_import?: string | null
+          emitido_em?: string | null
           erreurs?: string | null
           id?: string
           mois?: string
@@ -205,6 +210,7 @@ export type Database = {
           nom_fichier?: string
           source?: string | null
           statut?: string | null
+          storage_path?: string | null
         }
         Relationships: []
       }
