@@ -26,14 +26,17 @@ interface Facture {
   derniere_apparition: string | null; updated_at: string | null;
 }
 
-type HistoryRow =
-  | { kind: 'doc'; facture: Facture; sortDate: string }
-  | { kind: 'payment_detected'; facture: Facture; sortDate: string; detectedAt: string };
 interface Action {
   id: string; type_action: string; date_prevue: string; date_executee: string | null;
   statut: string; notes: string | null;
+  facture_id: string | null;
   factures: { numero_facture: string } | null;
 }
+
+type HistoryRow =
+  | { kind: 'doc'; facture: Facture; sortDate: string }
+  | { kind: 'payment_detected'; facture: Facture; sortDate: string; detectedAt: string }
+  | { kind: 'passage_perte'; action: Action; sortDate: string; date: string };
 
 const TYPE_ACTION_META: Record<string, { label: string; icon: string }> = {
   email_j7: { label: 'Email J+7', icon: '📧' },
@@ -132,9 +135,8 @@ export default function ClientDetail() {
   const invoices = activeFactures.filter(f => f.type_document === 'FACT' || f.type_document === 'NDEB');
   const totalResteDu = invoices.reduce((s, f) => s + Number(f.solde_restant ?? f.montant ?? 0), 0);
   const pertesCount = allFactures.filter(f => f.statut === 'perte').length;
-  // Historique complet : documents + lignes virtuelles "Paiement détecté" pour les
-  // FACT/NDEB passées en payee. La date affichée est updated_at (quand le système a
-  // basculé la facture en payee), pas derniere_apparition (dernière présence en pendentes).
+  // Historique complet : documents + lignes virtuelles "Paiement détecté" + lignes
+  // "Passage en perte" tirées des actions auto-générées. Tout trié par date desc.
   const historique: HistoryRow[] = (() => {
     const rows: HistoryRow[] = allFactures.map(f => ({ kind: 'doc' as const, facture: f, sortDate: f.date_emission }));
     for (const f of allFactures) {
@@ -143,6 +145,12 @@ export default function ClientDetail() {
       const detectedAt = (f.updated_at ? f.updated_at.slice(0, 10) : null) || f.derniere_apparition;
       if (!detectedAt) continue;
       rows.push({ kind: 'payment_detected', facture: f, sortDate: detectedAt, detectedAt });
+    }
+    for (const a of actions) {
+      if (a.type_action !== 'passage_perte') continue;
+      const date = a.date_executee || a.date_prevue;
+      if (!date) continue;
+      rows.push({ kind: 'passage_perte', action: a, sortDate: date, date });
     }
     return rows.sort((a, b) => new Date(b.sortDate).getTime() - new Date(a.sortDate).getTime());
   })();
@@ -526,7 +534,7 @@ export default function ClientDetail() {
               <CardHeader className="cursor-pointer hover:bg-muted/30">
                 <CardTitle className="text-base flex items-center gap-2 text-muted-foreground">
                   {movementsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                  Historique factures & règlements ({historique.length})
+                  Historique ({historique.length})
                 </CardTitle>
               </CardHeader>
             </CollapsibleTrigger>
@@ -556,6 +564,25 @@ export default function ClientDetail() {
                             <td className="p-3 text-right text-green-700">-{formatCurrency(f.montant)}</td>
                             <td className="p-3 text-right text-muted-foreground">—</td>
                             <td className="p-3 text-muted-foreground" title={tooltip}>{row.detectedAt}</td>
+                          </tr>
+                        );
+                      }
+                      if (row.kind === 'passage_perte') {
+                        const a = row.action;
+                        const numero = a.factures?.numero_facture ?? '—';
+                        const facture = a.facture_id ? allFactures.find(f => f.id === a.facture_id) : undefined;
+                        const montant = facture?.montant ?? null;
+                        return (
+                          <tr key={`perte-${a.id}`} className="border-b bg-red-50/40">
+                            <td className="p-3 font-medium">{numero}</td>
+                            <td className="p-3">
+                              <Badge variant="outline" className="text-xs bg-red-100 text-red-700 border-red-200">
+                                Passage en perte
+                              </Badge>
+                            </td>
+                            <td className="p-3 text-right text-red-700">{montant != null ? formatCurrency(montant) : '—'}</td>
+                            <td className="p-3 text-right text-muted-foreground">—</td>
+                            <td className="p-3 text-muted-foreground" title={a.notes ?? undefined}>{row.date}</td>
                           </tr>
                         );
                       }
