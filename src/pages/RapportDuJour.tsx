@@ -27,7 +27,7 @@ interface Action {
   statut: string;
   contenu_email: string | null;
   notes: string | null;
-  factures: { numero_facture: string; montant: number; date_echeance: string; solde_restant: number | null; statut: string; type_document: string } | null;
+  factures: { id: string; numero_facture: string; montant: number; date_echeance: string; solde_restant: number | null; statut: string; type_document: string } | null;
   clients: { nom: string; email: string | null; telephone: string | null; code_client: string; conditions_paiement: string | null; client_interne: boolean } | null;
 }
 
@@ -125,7 +125,7 @@ export default function RapportDuJour() {
     setLoading(true);
     const clientsJoin = country !== 'all' ? 'clients!inner' : 'clients';
     let actionsQuery = supabase.from('actions_relance')
-      .select(`*, factures(numero_facture, montant, date_echeance, solde_restant, statut, type_document), ${clientsJoin}(nom, email, telephone, code_client, conditions_paiement, client_interne)`)
+      .select(`*, factures(id, numero_facture, montant, date_echeance, solde_restant, statut, type_document), ${clientsJoin}(nom, email, telephone, code_client, conditions_paiement, client_interne)`)
       .eq('statut', 'a_faire').lte('date_prevue', today);
     if (country !== 'all') actionsQuery = actionsQuery.ilike('clients.code_client', `${country}_%`);
 
@@ -141,6 +141,7 @@ export default function RapportDuJour() {
     const allActions = ((actionsRes.data || []) as unknown as Action[])
       .filter(a => !a.clients?.client_interne && a.factures?.statut !== 'perte' && a.factures?.statut !== 'litige' && a.factures?.type_document !== 'REC' && a.factures?.type_document !== 'NCRE')
       .sort((a, b) => (TYPE_ACTION_ORDER[a.type_action] ?? 9) - (TYPE_ACTION_ORDER[b.type_action] ?? 9));
+    // Affichage par défaut — sera écrasé plus bas après filtrage par imputations.
     setActions(allActions);
 
     // Fetch extra KPIs from factures
@@ -241,13 +242,25 @@ export default function RapportDuJour() {
       const retardDataRaw = ((retardRes.data || []) as RetardRow[])
         .filter(f => !f.clients?.client_interne);
 
-      // Index des imputations manuelles couvrant currentData + retardDataRaw
+      // Index des imputations manuelles couvrant currentData + retardDataRaw + actions
+      const actionFactureIds = allActions
+        .map(a => a.factures?.id)
+        .filter((id): id is string => !!id);
       const factureIds = Array.from(new Set([
         ...currentData.map(f => f.id),
         ...retardDataRaw.map(f => f.id),
+        ...actionFactureIds,
       ]));
       const imputations = await fetchImputationsForFactures(factureIds).catch(() => []);
       const idxImp = indexImputations(imputations);
+
+      // Une action de relance n'a plus lieu d'être si la facture a été soldée
+      // par une imputation manuelle (reste dû = 0).
+      const filteredActions = allActions.filter(a => {
+        if (!a.factures) return true;
+        return resteDu(a.factures, idxImp) > 0.001;
+      });
+      setActions(filteredActions);
 
       type FactureRow = { numero_facture: string; montant: number; solde_restant: number | null; source: string | null; clients: { nom: string; client_interne?: boolean } | null };
       const toResume = (f: FactureRow): FactureResume => ({

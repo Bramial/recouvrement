@@ -146,6 +146,9 @@ export default function Creances() {
         return true;
       });
     }
+    // Une FACT/NDEB entièrement imputée par un règlement manuel n'est plus une créance —
+    // on la masque comme on masque déjà les factures statut='payee'.
+    res = res.filter(f => resteDu(f, imputationsIdx) > 0.001);
     // Total des créances (FACT/NDEB seulement) avec imputations manuelles appliquées.
     const totalAlgebrique = res.reduce((s, f) => s + resteDu(f, imputationsIdx), 0);
     res = [...res].sort((a, b) => {
