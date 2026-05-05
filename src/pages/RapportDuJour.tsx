@@ -16,6 +16,7 @@ import { toast } from 'sonner';
 import { useCountryFilter } from '@/hooks/useCountryFilter';
 import { CountryFilter } from '@/components/CountryFilter';
 import { useAuth } from '@/hooks/useAuth';
+import { indexImputations, resteDuSigne, resteDu, fetchImputationsForFactures } from '@/lib/imputations';
 
 interface Action {
   id: string;
@@ -160,10 +161,10 @@ export default function RapportDuJour() {
         .maybeSingle();
       const latestApparition = latestAppRow?.derniere_apparition as string | undefined;
 
-      // Total créances : SUM(solde_restant) WHERE statut='en_cours' tous types confondus.
-      // Les NCRE/REC négatifs réduisent le dû net — pas de filtre par type_document.
+      // Total créances : SUM(reste dû signé) WHERE statut='en_cours' tous types confondus.
+      // Les NCRE/REC non encore imputés réduisent le dû net — pas de filtre par type_document.
       let currentQuery = supabase.from('factures')
-        .select('solde_restant, source, client_id, clients(code_client, client_interne)')
+        .select('id, type_document, montant, solde_restant, source, client_id, clients(code_client, client_interne)')
         .eq('mois_extraction', maxMois)
         .eq('statut', 'en_cours');
       if (country !== 'all') currentQuery = currentQuery.eq('source', country);
@@ -201,7 +202,7 @@ export default function RapportDuJour() {
       // En retard: factures en cours avec échéance dépassée (pour recalculer côté client, sans internes)
       const today = format(new Date(), 'yyyy-MM-dd');
       let retardQuery = supabase.from('factures')
-        .select('solde_restant, clients(client_interne)')
+        .select('id, type_document, montant, solde_restant, clients(client_interne)')
         .eq('mois_extraction', maxMois)
         .in('statut', ['en_cours', 'retention_dgd'])
         .in('type_document', ['FACT', 'NDEB'])
@@ -230,10 +231,23 @@ export default function RapportDuJour() {
         currentQuery, prevQuery, regleesQuery, nouvellesQuery, reglementsQuery, retardQuery, litigesQuery, litigesPrevQuery, pertesQuery, pertesPrevQuery,
       ]);
 
-      const currentData = ((currentRes.data || []) as { solde_restant: number | null; source: string | null; clients: { client_interne: boolean } | null }[])
+      type CurrentRow = { id: string; type_document: string | null; montant: number; solde_restant: number | null; source: string | null; clients: { client_interne: boolean } | null };
+      type RetardRow = { id: string; type_document: string | null; montant: number; solde_restant: number | null; clients: { client_interne: boolean } | null };
+
+      const currentData = ((currentRes.data || []) as CurrentRow[])
         .filter(f => !f.clients?.client_interne);
       const prevData = ((prevRes.data || []) as { solde_restant: number | null; clients: { client_interne: boolean } | null }[])
         .filter(f => !f.clients?.client_interne);
+      const retardDataRaw = ((retardRes.data || []) as RetardRow[])
+        .filter(f => !f.clients?.client_interne);
+
+      // Index des imputations manuelles couvrant currentData + retardDataRaw
+      const factureIds = Array.from(new Set([
+        ...currentData.map(f => f.id),
+        ...retardDataRaw.map(f => f.id),
+      ]));
+      const imputations = await fetchImputationsForFactures(factureIds).catch(() => []);
+      const idxImp = indexImputations(imputations);
 
       type FactureRow = { numero_facture: string; montant: number; solde_restant: number | null; source: string | null; clients: { nom: string; client_interne?: boolean } | null };
       const toResume = (f: FactureRow): FactureResume => ({
@@ -256,17 +270,16 @@ export default function RapportDuJour() {
         .filter(f => !f.clients?.client_interne)
         .map(toResume);
 
-      const totalCreances = currentData.reduce((sum, f) => sum + (f.solde_restant || 0), 0);
+      const totalCreances = currentData.reduce((sum, f) => sum + resteDuSigne(f, idxImp), 0);
       const totalCreancesPrev = prevData.reduce((sum, f) => sum + (f.solde_restant || 0), 0);
-      const totalFR = currentData.filter(f => f.source === 'FR').reduce((sum, f) => sum + (f.solde_restant || 0), 0);
-      const totalPT = currentData.filter(f => f.source === 'PT').reduce((sum, f) => sum + (f.solde_restant || 0), 0);
+      const totalFR = currentData.filter(f => f.source === 'FR').reduce((sum, f) => sum + resteDuSigne(f, idxImp), 0);
+      const totalPT = currentData.filter(f => f.source === 'PT').reduce((sum, f) => sum + resteDuSigne(f, idxImp), 0);
 
       type StatRow = { solde_restant: number | null; clients: { client_interne: boolean } | null };
       const excludeInterne = (rows: StatRow[]) => rows.filter(r => !r.clients?.client_interne);
-      const retardData = excludeInterne((retardRes.data || []) as StatRow[]);
       const litigesPrevData = excludeInterne((litigesPrevRes.data || []) as StatRow[]);
       const pertesPrevData = excludeInterne((pertesPrevRes.data || []) as StatRow[]);
-      const totalEnRetard = retardData.reduce((s, f) => s + (f.solde_restant || 0), 0);
+      const totalEnRetard = retardDataRaw.reduce((s, f) => s + resteDu(f, idxImp), 0);
 
       const litiges = ((litigesRes.data || []) as FactureRow[])
         .filter(f => !f.clients?.client_interne);

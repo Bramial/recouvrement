@@ -14,6 +14,7 @@ import { useNavigate } from 'react-router-dom';
 import { useCountryFilter } from '@/hooks/useCountryFilter';
 import { CountryFilter } from '@/components/CountryFilter';
 import { useAuth } from '@/hooks/useAuth';
+import { indexImputations, resteDu, aImputations, fetchImputationsForFactures, type ImputationLite } from '@/lib/imputations';
 
 interface Facture {
   id: string;
@@ -77,6 +78,7 @@ const MANUAL_ACTION_TYPES = [
 
 export default function Creances() {
   const [factures, setFactures] = useState<Facture[]>([]);
+  const [imputations, setImputations] = useState<ImputationLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [manualModal, setManualModal] = useState<Facture | null>(null);
   const [manualMode, setManualMode] = useState<'past' | 'scheduled'>('past');
@@ -109,11 +111,16 @@ export default function Creances() {
       if (country !== 'all') query = query.ilike('clients.code_client', `${country}_%`);
       query = query.order('date_echeance', { ascending: true });
       const { data } = await query;
-      setFactures((data || []) as unknown as Facture[]);
+      const rows = (data || []) as unknown as Facture[];
+      setFactures(rows);
+      const imps = await fetchImputationsForFactures(rows.map(f => f.id)).catch(() => [] as ImputationLite[]);
+      setImputations(imps);
       setLoading(false);
     };
     load();
   }, [country]);
+
+  const imputationsIdx = useMemo(() => indexImputations(imputations), [imputations]);
 
   const { filtered, totalAlgebrique } = useMemo(() => {
     let res = factures;
@@ -139,17 +146,17 @@ export default function Creances() {
         return true;
       });
     }
-    // Total des créances (soldes recalculés, uniquement FACT/NDEB)
-    const totalAlgebrique = res.reduce((s, f) => s + (f.solde_restant ?? f.montant), 0);
+    // Total des créances (FACT/NDEB seulement) avec imputations manuelles appliquées.
+    const totalAlgebrique = res.reduce((s, f) => s + resteDu(f, imputationsIdx), 0);
     res = [...res].sort((a, b) => {
       let cmp = 0;
       if (sortField === 'retard') cmp = joursRetard(b.date_echeance) - joursRetard(a.date_echeance);
-      else if (sortField === 'montant') cmp = (b.solde_restant ?? b.montant) - (a.solde_restant ?? a.montant);
+      else if (sortField === 'montant') cmp = resteDu(b, imputationsIdx) - resteDu(a, imputationsIdx);
       else cmp = (a.clients?.nom || '').localeCompare(b.clients?.nom || '');
       return sortAsc ? -cmp : cmp;
     });
     return { filtered: res, totalAlgebrique };
-  }, [factures, search, retardFilter, sortField, sortAsc, showLitiges]);
+  }, [factures, search, retardFilter, sortField, sortAsc, showLitiges, imputationsIdx]);
 
   const perteFacture = async (f: Facture, perte: boolean, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -316,7 +323,16 @@ export default function Creances() {
                         </Badge>
                       )}
                     </td>
-                    <td className="p-3 text-right font-medium">{formatCurrency(f.solde_restant ?? f.montant)}</td>
+                    <td className="p-3 text-right font-medium">
+                      {aImputations(f, imputationsIdx) ? (
+                        <span>
+                          <s className="text-muted-foreground mr-1">{formatCurrency(f.montant)}</s>
+                          {formatCurrency(resteDu(f, imputationsIdx))}
+                        </span>
+                      ) : (
+                        formatCurrency(resteDu(f, imputationsIdx))
+                      )}
+                    </td>
                     <td className="p-3 text-muted-foreground">{f.date_echeance}</td>
                     <td className="p-3 text-center"><Badge className={badge.className}>{badge.label}</Badge></td>
                     <td className="p-3">{f.clients?.code_client.startsWith('FR_') ? '🇫🇷 FR' : f.clients?.code_client.startsWith('PT_') ? '🇵🇹 PT' : f.source}</td>
@@ -383,7 +399,7 @@ export default function Creances() {
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <span className="text-muted-foreground">Client</span><span className="font-medium">{selected.clients?.nom}</span>
                   <span className="text-muted-foreground">Montant original</span><span>{formatCurrency(selected.montant)}</span>
-                  <span className="text-muted-foreground">Reste dû</span><span className="font-medium">{formatCurrency(selected.solde_restant ?? selected.montant)}</span>
+                  <span className="text-muted-foreground">Reste dû</span><span className="font-medium">{formatCurrency(resteDu(selected, imputationsIdx))}</span>
                   <span className="text-muted-foreground">Émission</span><span>{selected.date_emission}</span>
                   <span className="text-muted-foreground">Échéance</span><span>{selected.date_echeance}</span>
                   <span className="text-muted-foreground">Retard</span><span>{joursRetard(selected.date_echeance)}j</span>

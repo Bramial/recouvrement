@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { getMaxMoisExtraction } from '@/lib/supabaseHelpers';
@@ -10,10 +10,19 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Save, XOctagon, RotateCcw, ChevronDown, ChevronRight, Undo2, Scale, ShieldCheck, Plus, CheckCircle, X, Paperclip, Download, Trash2, Upload } from 'lucide-react';
+import { ArrowLeft, Save, XOctagon, RotateCcw, ChevronDown, ChevronRight, Undo2, Scale, ShieldCheck, Plus, CheckCircle, X, Paperclip, Download, Trash2, Upload, Coins } from 'lucide-react';
 import type { FileObject } from '@supabase/storage-js';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
+import { ImputationModal } from '@/components/ImputationModal';
+import {
+  indexImputations,
+  resteDuSigne,
+  resteDu,
+  aImputations,
+  fetchImputationsForClient,
+  type ImputationLite,
+} from '@/lib/imputations';
 
 interface Client {
   id: string; code_client: string; nom: string; email: string | null;
@@ -52,6 +61,7 @@ const TYPE_ACTION_META: Record<string, { label: string; icon: string }> = {
   autre_manuel: { label: 'Autre', icon: '📋' },
   passage_perte: { label: 'Passage en perte', icon: '🛑' },
   annulation_avoir: { label: 'Avoir annulé', icon: '🚫' },
+  imputation_manuelle: { label: 'Imputation', icon: '💶' },
 };
 
 const MANUAL_ACTION_TYPES = [
@@ -72,9 +82,11 @@ const STATUT_META: Record<string, { label: string; variant: 'default' | 'seconda
 export default function ClientDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { canWrite } = useAuth();
+  const { canWrite, user } = useAuth();
   const [client, setClient] = useState<Client | null>(null);
   const [actions, setActions] = useState<Action[]>([]);
+  const [imputations, setImputations] = useState<ImputationLite[]>([]);
+  const [imputationModal, setImputationModal] = useState<Facture | null>(null);
   const [email, setEmail] = useState('');
   const [telephone, setTelephone] = useState('');
   const [conditions, setConditions] = useState('');
@@ -112,10 +124,11 @@ export default function ClientDetail() {
       let facturesQuery = supabase.from('factures').select('*').eq('client_id', id);
       if (maxMois) facturesQuery = facturesQuery.eq('mois_extraction', maxMois);
 
-      const [cRes, fRes, aRes] = await Promise.all([
+      const [cRes, fRes, aRes, impRes] = await Promise.all([
         supabase.from('clients').select('*').eq('id', id).single(),
         facturesQuery,
         supabase.from('actions_relance').select('*, factures(numero_facture)').eq('client_id', id).order('date_prevue', { ascending: false }),
+        fetchImputationsForClient(id).catch(() => [] as ImputationLite[]),
       ]);
 
       const c = cRes.data as unknown as Client;
@@ -130,16 +143,30 @@ export default function ClientDetail() {
 
       setAllFactures((fRes.data || []) as unknown as Facture[]);
       setActions((aRes.data || []) as unknown as Action[]);
+      setImputations(impRes);
     };
     load();
   }, [id]);
+
+  const reloadImputationsAndActions = async () => {
+    if (!id) return;
+    const [imp, act] = await Promise.all([
+      fetchImputationsForClient(id).catch(() => [] as ImputationLite[]),
+      supabase.from('actions_relance').select('*, factures(numero_facture)').eq('client_id', id).order('date_prevue', { ascending: false }),
+    ]);
+    setImputations(imp);
+    setActions((act.data || []) as unknown as Action[]);
+  };
+
+  // Index des imputations manuelles — source de vérité pour le reste dû.
+  const imputationsIdx = useMemo(() => indexImputations(imputations), [imputations]);
 
   // Bloc "Factures en cours" : strict statut='en_cours' (ou 'perte' si toggle), tous types
   // confondus (FACT, NDEB, NCRE, REC). Les négatifs réduisent le dû. Tri par date desc.
   const invoices = allFactures
     .filter(f => showPertes ? (f.statut === 'perte' || f.statut === 'pertes_profits') : f.statut === 'en_cours')
     .sort((a, b) => new Date(b.date_emission).getTime() - new Date(a.date_emission).getTime());
-  const totalResteDu = invoices.reduce((s, f) => s + Number(f.solde_restant ?? f.montant ?? 0), 0);
+  const totalResteDu = invoices.reduce((s, f) => s + resteDuSigne(f, imputationsIdx), 0);
   const pertesCount = allFactures.filter(f => f.statut === 'perte' || f.statut === 'pertes_profits').length;
   // Historique complet : documents + lignes virtuelles "Paiement détecté" + lignes
   // "Passage en perte" tirées des actions auto-générées. Tout trié par date desc.
@@ -160,11 +187,11 @@ export default function ClientDetail() {
     }
     return rows.sort((a, b) => new Date(b.sortDate).getTime() - new Date(a.sortDate).getTime());
   })();
-  // Solde net = somme des solde_restant des lignes en_cours (tous types). Les NCRE/REC
-  // négatives réduisent le dû ; perte/litige/retention_dgd/payee sont exclus.
+  // Solde net = somme des restes dus signés des lignes en_cours (tous types). Les NCRE/REC
+  // non encore imputés restent négatifs ; perte/litige/retention_dgd/payee sont exclus.
   const soldeNet = allFactures
     .filter(f => f.statut === 'en_cours')
-    .reduce((s, f) => s + Number(f.solde_restant ?? f.montant ?? 0), 0);
+    .reduce((s, f) => s + resteDuSigne(f, imputationsIdx), 0);
 
   const perteFacture = async (facture: Facture, perte: boolean) => {
     const isCredit = facture.type_document === 'NCRE' || facture.type_document === 'REC';
@@ -499,6 +526,15 @@ export default function ClientDetail() {
                   REC: { label: 'Acompte', className: 'bg-orange-100 text-orange-700 border-orange-200' },
                 };
                 const tb = typeBadgeMeta[f.type_document] || { label: f.type_document, className: '' };
+                const isInvoice = f.type_document === 'FACT' || f.type_document === 'NDEB';
+                const isPayment = f.type_document === 'NCRE' || f.type_document === 'REC';
+                const hasImputations = aImputations(f, imputationsIdx);
+                const resteSigne = resteDuSigne(f, imputationsIdx);
+                const resteNonSigne = resteDu(f, imputationsIdx);
+                const resteAffiche = isPayment ? resteSigne : resteNonSigne;
+                const resteClass = isInvoice
+                  ? (resteNonSigne === 0 ? 'text-green-600' : '')
+                  : (resteSigne === 0 ? 'text-green-600' : 'text-orange-700');
                 return (
                 <tr key={f.id} className="border-b">
                   <td className="p-3">
@@ -507,8 +543,10 @@ export default function ClientDetail() {
                   <td className="p-3">
                     <Badge variant="outline" className={`text-xs ${tb.className}`}>{tb.label}</Badge>
                   </td>
-                  <td className="p-3 text-right text-muted-foreground">{formatCurrency(f.montant)}</td>
-                  <td className="p-3 text-right font-medium">{formatCurrency(Number(f.solde_restant ?? f.montant ?? 0))}</td>
+                  <td className="p-3 text-right text-muted-foreground">
+                    {hasImputations ? <s>{formatCurrency(f.montant)}</s> : formatCurrency(f.montant)}
+                  </td>
+                  <td className={`p-3 text-right font-medium ${resteClass}`}>{formatCurrency(resteAffiche)}</td>
                   <td className="p-3">{f.date_echeance}</td>
                   <td className="p-3 text-center">
                     <div className="flex items-center justify-center gap-1">
@@ -529,8 +567,11 @@ export default function ClientDetail() {
                       <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => perteFacture(f, false)} title="Restaurer">
                         <RotateCcw className="h-3.5 w-3.5" />
                       </Button>
-                    ) : (f.type_document === 'FACT' || f.type_document === 'NDEB') ? (
+                    ) : isInvoice ? (
                       <>
+                        <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => setImputationModal(f)} title={hasImputations ? "Voir / modifier les imputations" : "Imputer un règlement"}>
+                          <Coins className="h-3.5 w-3.5" />
+                        </Button>
                         <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => { setDgdModal(f); setDgdDate(''); }} title="Rétention DGD">
                           <ShieldCheck className="h-3.5 w-3.5" />
                         </Button>
@@ -541,7 +582,7 @@ export default function ClientDetail() {
                           <XOctagon className="h-3.5 w-3.5" />
                         </Button>
                       </>
-                    ) : (f.type_document === 'NCRE' || f.type_document === 'REC') ? (
+                    ) : isPayment ? (
                       <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => perteFacture(f, true)} title={f.type_document === 'NCRE' ? "Annuler l'avoir" : "Annuler l'acompte"}>
                         <XOctagon className="h-3.5 w-3.5" />
                       </Button>
@@ -642,7 +683,7 @@ export default function ClientDetail() {
                       };
                       const badge = typeBadge[f.type_document] || { label: f.type_document, className: '' };
                       const sb = statutBadge[f.statut] || { label: f.statut, className: '' };
-                      const solde = Number(f.solde_restant ?? 0);
+                      const solde = resteDuSigne(f, imputationsIdx);
                       return (
                         <tr key={f.id} className="border-b">
                           <td className="p-3">{f.numero_facture}</td>
@@ -744,6 +785,18 @@ export default function ClientDetail() {
           )}
         </CardContent>
       </Card>
+
+      {imputationModal && client && (
+        <ImputationModal
+          facture={imputationModal}
+          client={{ id: client.id, nom: client.nom }}
+          facturesClient={allFactures}
+          imputationsClient={imputations}
+          currentUserId={user?.id ?? null}
+          onClose={() => setImputationModal(null)}
+          onDone={reloadImputationsAndActions}
+        />
+      )}
 
       {dgdModal && (
         <div className="fixed inset-0 bg-foreground/50 flex items-center justify-center z-50 p-4">

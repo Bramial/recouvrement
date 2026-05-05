@@ -172,6 +172,61 @@ export type Database = {
           },
         ]
       }
+      imputations_paiement: {
+        Row: {
+          client_id: string
+          commentaire: string | null
+          created_at: string
+          created_by: string | null
+          facture_id: string
+          id: string
+          montant_impute: number
+          paiement_id: string
+        }
+        Insert: {
+          client_id: string
+          commentaire?: string | null
+          created_at?: string
+          created_by?: string | null
+          facture_id: string
+          id?: string
+          montant_impute: number
+          paiement_id: string
+        }
+        Update: {
+          client_id?: string
+          commentaire?: string | null
+          created_at?: string
+          created_by?: string | null
+          facture_id?: string
+          id?: string
+          montant_impute?: number
+          paiement_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "imputations_paiement_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "imputations_paiement_facture_id_fkey"
+            columns: ["facture_id"]
+            isOneToOne: false
+            referencedRelation: "factures"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "imputations_paiement_paiement_id_fkey"
+            columns: ["paiement_id"]
+            isOneToOne: false
+            referencedRelation: "factures"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       imports: {
         Row: {
           date_import: string | null
