@@ -164,9 +164,10 @@ export default function RapportDuJour() {
 
       // Total créances : SUM(reste dû signé) WHERE statut='en_cours' tous types confondus.
       // Les NCRE/REC non encore imputés réduisent le dû net — pas de filtre par type_document.
+      // Pas de filtre mois_extraction : une facture en_cours sur un mois ancien (encore
+      // pertinente, jamais ré-importée) doit aussi compter.
       let currentQuery = supabase.from('factures')
         .select('id, type_document, montant, solde_restant, source, client_id, clients(code_client, client_interne)')
-        .eq('mois_extraction', maxMois)
         .eq('statut', 'en_cours');
       if (country !== 'all') currentQuery = currentQuery.eq('source', country);
 
@@ -200,11 +201,11 @@ export default function RapportDuJour() {
       if (latestApparition) reglementsQuery = reglementsQuery.eq('premiere_apparition', latestApparition);
       if (country !== 'all') reglementsQuery = reglementsQuery.eq('source', country);
 
-      // En retard: factures en cours avec échéance dépassée (pour recalculer côté client, sans internes)
+      // En retard: factures en cours avec échéance dépassée (sans filtre mois_extraction
+      // pour rester cohérent avec le total créances).
       const today = format(new Date(), 'yyyy-MM-dd');
       let retardQuery = supabase.from('factures')
         .select('id, type_document, montant, solde_restant, clients(client_interne)')
-        .eq('mois_extraction', maxMois)
         .in('statut', ['en_cours', 'retention_dgd'])
         .in('type_document', ['FACT', 'NDEB'])
         .lt('date_echeance', today);

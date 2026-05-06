@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { getMaxMoisExtraction } from '@/lib/supabaseHelpers';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -101,13 +100,10 @@ export default function Creances() {
 
   useEffect(() => {
     const load = async () => {
-      const maxMois = await getMaxMoisExtraction();
-      const joinType = country !== 'all' ? 'clients!inner' : 'clients';
       let query = supabase.from('factures').select(`*, clients!inner(nom, code_client, exclusion_relance, client_interne)`)
         .in('statut', ['en_cours', 'litige', 'retention_dgd'])
         .in('type_document', ['FACT', 'NDEB'])
         .eq('clients.client_interne', false);
-      if (maxMois) query = query.eq('mois_extraction', maxMois);
       if (country !== 'all') query = query.ilike('clients.code_client', `${country}_%`);
       query = query.order('date_echeance', { ascending: true });
       const { data } = await query;
