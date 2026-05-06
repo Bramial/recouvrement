@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ChevronDown, ChevronRight, Upload, Trash2 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { toast } from 'sonner';
@@ -179,20 +180,29 @@ export default function Historique() {
       const emitidoIso = toIsoDate(emitidoEm);
 
       const detectedSource = detectSource(file.name);
-      let q = supabase
-        .from('imports')
-        .select('emitido_em, source, nom_fichier')
-        .not('emitido_em', 'is', null)
-        .order('emitido_em', { ascending: false })
-        .limit(1);
-      if (detectedSource) q = q.eq('source', detectedSource);
-      const { data: latestRows } = await q;
-      const latest = latestRows?.[0];
-      if (latest?.emitido_em && emitidoIso < latest.emitido_em) {
-        toast.error(
-          `${file.name} : "Emitido em" ${formatDateFR(emitidoIso)} antérieur au dernier import${detectedSource ? ` ${detectedSource}` : ''} (${formatDateFR(latest.emitido_em)})`
+      // On ne vérifie l'antériorité que si on connaît la source — comparer entre sources
+      // différentes (FR vs PT) n'a pas de sens (deux flux indépendants). Si la détection
+      // automatique échoue, on laisse uploader et on demande à l'utilisateur de fixer la
+      // source manuellement via le menu de la ligne d'import.
+      if (detectedSource) {
+        const { data: latestRows } = await supabase
+          .from('imports')
+          .select('emitido_em, source, nom_fichier')
+          .eq('source', detectedSource)
+          .not('emitido_em', 'is', null)
+          .order('emitido_em', { ascending: false })
+          .limit(1);
+        const latest = latestRows?.[0];
+        if (latest?.emitido_em && emitidoIso < latest.emitido_em) {
+          toast.error(
+            `${file.name} : "Emitido em" ${formatDateFR(emitidoIso)} antérieur au dernier import ${detectedSource} (${formatDateFR(latest.emitido_em)})`
+          );
+          continue;
+        }
+      } else {
+        toast.warning(
+          `${file.name} : source FR/PT non détectée dans le nom du fichier. Pense à la sélectionner après l'upload.`
         );
-        continue;
       }
 
       const uploadKey = `${Date.now()}-${slugifyFilename(file.name)}`;
@@ -229,6 +239,38 @@ export default function Historique() {
     }
     setUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleSourceChange = async (imp: Import, newSource: 'FR' | 'PT') => {
+    if (imp.source === newSource) return;
+    // Vérifier l'antériorité contre la nouvelle source choisie.
+    if (imp.emitido_em) {
+      const { data: latestRows } = await supabase
+        .from('imports')
+        .select('emitido_em, nom_fichier')
+        .eq('source', newSource)
+        .neq('id', imp.id)
+        .not('emitido_em', 'is', null)
+        .order('emitido_em', { ascending: false })
+        .limit(1);
+      const latest = latestRows?.[0];
+      if (latest?.emitido_em && imp.emitido_em < latest.emitido_em) {
+        const ok = confirm(
+          `Cet import est daté du ${formatDateFR(imp.emitido_em)}, antérieur au dernier import ${newSource} (${formatDateFR(latest.emitido_em)}). Continuer ?`
+        );
+        if (!ok) return;
+      }
+    }
+    const { error } = await supabase
+      .from('imports')
+      .update({ source: newSource })
+      .eq('id', imp.id);
+    if (error) {
+      toast.error(`Source non mise à jour : ${error.message}`);
+      return;
+    }
+    setImports((prev) => prev.map((i) => (i.id === imp.id ? { ...i, source: newSource } : i)));
+    toast.success(`Source ${newSource} appliquée`);
   };
 
   const handleDelete = async (imp: Import) => {
@@ -347,7 +389,23 @@ export default function Historique() {
               {imports.map(i => (
                 <tr key={i.id} className="border-b">
                   <td className="p-3">{i.nom_fichier}</td>
-                  <td className="p-3">{i.source ? <Badge variant="secondary">{i.source}</Badge> : <span className="text-muted-foreground">—</span>}</td>
+                  <td className="p-3">
+                    {i.statut === 'a_traiter' && canWrite ? (
+                      <Select value={i.source ?? ''} onValueChange={(v) => handleSourceChange(i, v as 'FR' | 'PT')}>
+                        <SelectTrigger className="h-7 w-[80px] text-xs">
+                          <SelectValue placeholder="—" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="FR">FR</SelectItem>
+                          <SelectItem value="PT">PT</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : i.source ? (
+                      <Badge variant="secondary">{i.source}</Badge>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
                   <td className="p-3">{i.mois}</td>
                   <td className="p-3 text-right">{i.nb_lignes_parsees ?? '—'}/{i.nb_lignes_brutes ?? '—'}</td>
                   <td className="p-3 text-center">
