@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { getMaxMoisExtraction } from '@/lib/supabaseHelpers';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Button } from '@/components/ui/button';
@@ -119,10 +118,10 @@ export default function ClientDetail() {
   useEffect(() => {
     if (!id) return;
     const load = async () => {
-      const maxMois = await getMaxMoisExtraction();
-      // Charger TOUTES les factures du client (tous types, tous statuts)
-      let facturesQuery = supabase.from('factures').select('*').eq('client_id', id);
-      if (maxMois) facturesQuery = facturesQuery.eq('mois_extraction', maxMois);
+      // Charger TOUTES les factures du client, tous types/statuts/mois confondus.
+      // Filtrer par mois_extraction cachait les factures en litige/perte de mois
+      // précédents (qui ont disparu de pendentes mais sont toujours pertinentes).
+      const facturesQuery = supabase.from('factures').select('*').eq('client_id', id);
 
       const [cRes, fRes, aRes, impRes] = await Promise.all([
         supabase.from('clients').select('*').eq('id', id).single(),
