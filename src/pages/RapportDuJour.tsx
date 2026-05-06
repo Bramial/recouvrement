@@ -210,26 +210,22 @@ export default function RapportDuJour() {
         .lt('date_echeance', today);
       if (country !== 'all') retardQuery = retardQuery.eq('source', country);
 
-      // Litiges current (détail pour modal) & previous (solde only pour trend)
+      // Litiges et Pertes : KPIs CUMULATIFS — pas de filtre mois_extraction.
+      // Une facture passée en perte/litige garde son ancien mois_extraction (elle peut
+      // avoir disparu de pendentes), donc la filtrer par maxMois faisait apparaître 0.
+      // Le trend "vs mois préc." n'a pas de sens sur du cumulé : on le neutralise (null).
       let litigesQuery = supabase.from('factures')
         .select('numero_facture, montant, solde_restant, source, clients(nom, client_interne)')
-        .eq('mois_extraction', maxMois).eq('statut', 'litige');
+        .eq('statut', 'litige');
       if (country !== 'all') litigesQuery = litigesQuery.eq('source', country);
-      let litigesPrevQuery = supabase.from('factures')
-        .select('solde_restant, clients(client_interne)').eq('mois_extraction', prevMois).eq('statut', 'litige');
-      if (country !== 'all') litigesPrevQuery = litigesPrevQuery.eq('source', country);
 
-      // Pertes current (détail pour modal) & previous (inclut 'perte' manuelle + 'pertes_profits' importé)
       let pertesQuery = supabase.from('factures')
         .select('numero_facture, montant, solde_restant, source, clients(nom, client_interne)')
-        .eq('mois_extraction', maxMois).in('statut', ['perte', 'pertes_profits']);
+        .in('statut', ['perte', 'pertes_profits']);
       if (country !== 'all') pertesQuery = pertesQuery.eq('source', country);
-      let pertesPrevQuery = supabase.from('factures')
-        .select('solde_restant, clients(client_interne)').eq('mois_extraction', prevMois).in('statut', ['perte', 'pertes_profits']);
-      if (country !== 'all') pertesPrevQuery = pertesPrevQuery.eq('source', country);
 
-      const [currentRes, prevRes, regleesRes, nouvellesRes, reglementsRes, retardRes, litigesRes, litigesPrevRes, pertesRes, pertesPrevRes] = await Promise.all([
-        currentQuery, prevQuery, regleesQuery, nouvellesQuery, reglementsQuery, retardQuery, litigesQuery, litigesPrevQuery, pertesQuery, pertesPrevQuery,
+      const [currentRes, prevRes, regleesRes, nouvellesRes, reglementsRes, retardRes, litigesRes, pertesRes] = await Promise.all([
+        currentQuery, prevQuery, regleesQuery, nouvellesQuery, reglementsQuery, retardQuery, litigesQuery, pertesQuery,
       ]);
 
       type CurrentRow = { id: string; type_document: string | null; montant: number; solde_restant: number | null; source: string | null; clients: { client_interne: boolean } | null };
@@ -288,10 +284,6 @@ export default function RapportDuJour() {
       const totalFR = currentData.filter(f => f.source === 'FR').reduce((sum, f) => sum + resteDuSigne(f, idxImp), 0);
       const totalPT = currentData.filter(f => f.source === 'PT').reduce((sum, f) => sum + resteDuSigne(f, idxImp), 0);
 
-      type StatRow = { solde_restant: number | null; clients: { client_interne: boolean } | null };
-      const excludeInterne = (rows: StatRow[]) => rows.filter(r => !r.clients?.client_interne);
-      const litigesPrevData = excludeInterne((litigesPrevRes.data || []) as StatRow[]);
-      const pertesPrevData = excludeInterne((pertesPrevRes.data || []) as StatRow[]);
       const totalEnRetard = retardDataRaw.reduce((s, f) => s + resteDu(f, idxImp), 0);
 
       const litiges = ((litigesRes.data || []) as FactureRow[])
@@ -311,10 +303,10 @@ export default function RapportDuJour() {
         litiges: litiges.map(toResume),
         pertes: pertes.map(toResume),
         totalLitiges: litiges.reduce((s, f) => s + (f.solde_restant || 0), 0),
-        totalLitigesPrev: litigesPrevData.reduce((s, f) => s + (f.solde_restant || 0), 0),
+        totalLitigesPrev: 0,
         nbLitiges: litiges.length,
         totalPertes: pertes.reduce((s, f) => s + (f.solde_restant || 0), 0),
-        totalPertesPrev: pertesPrevData.reduce((s, f) => s + (f.solde_restant || 0), 0),
+        totalPertesPrev: 0,
       });
     }
 
