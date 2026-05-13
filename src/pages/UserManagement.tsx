@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Trash2, UserPlus, Loader2 } from 'lucide-react';
+import { Trash2, UserPlus, Loader2, KeyRound, Copy, Check } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface ManagedUser {
@@ -17,7 +17,6 @@ interface ManagedUser {
   role: AppRole | null;
   last_sign_in_at: string | null;
   created_at: string | null;
-  invited_at: string | null;
 }
 
 const ROLE_LABEL: Record<AppRole, string> = {
@@ -36,10 +35,12 @@ export default function UserManagement() {
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [loading, setLoading] = useState(true);
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<AppRole>('user');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createEmail, setCreateEmail] = useState('');
+  const [createRole, setCreateRole] = useState<AppRole>('user');
   const [submitting, setSubmitting] = useState(false);
+  const [credentials, setCredentials] = useState<{ email: string; password: string; title: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -57,22 +58,35 @@ export default function UserManagement() {
 
   useEffect(() => { load(); }, []);
 
-  const invite = async () => {
-    if (!inviteEmail.trim()) return;
+  const create = async () => {
+    if (!createEmail.trim()) return;
     setSubmitting(true);
+    const email = createEmail.trim();
     const { data, error } = await supabase.functions.invoke('manage-users', {
-      body: { action: 'invite', email: inviteEmail.trim(), role: inviteRole },
+      body: { action: 'create', email, role: createRole },
     });
     setSubmitting(false);
     if (error || data?.error) {
-      toast.error(`Invitation: ${error?.message ?? data?.error}`);
+      toast.error(`Création: ${error?.message ?? data?.error}`);
       return;
     }
-    toast.success(`Invitation envoyée à ${inviteEmail}`);
-    setInviteOpen(false);
-    setInviteEmail('');
-    setInviteRole('user');
+    setCreateOpen(false);
+    setCreateEmail('');
+    setCreateRole('user');
+    setCredentials({ email, password: data.password as string, title: 'Compte créé' });
     load();
+  };
+
+  const resetPassword = async (u: ManagedUser) => {
+    if (!confirm(`Réinitialiser le mot de passe de ${u.email} ?`)) return;
+    const { data, error } = await supabase.functions.invoke('manage-users', {
+      body: { action: 'reset_password', user_id: u.id },
+    });
+    if (error || data?.error) {
+      toast.error(`Réinitialisation: ${error?.message ?? data?.error}`);
+      return;
+    }
+    setCredentials({ email: u.email ?? '', password: data.password as string, title: 'Nouveau mot de passe' });
   };
 
   const updateRole = async (userId: string, role: AppRole) => {
@@ -100,6 +114,18 @@ export default function UserManagement() {
     toast.success('Utilisateur supprimé');
   };
 
+  const copyPassword = async () => {
+    if (!credentials) return;
+    await navigator.clipboard.writeText(credentials.password);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const closeCredentials = () => {
+    setCredentials(null);
+    setCopied(false);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -107,8 +133,8 @@ export default function UserManagement() {
           <h1 className="text-2xl font-bold tracking-tight">Utilisateurs</h1>
           <p className="text-sm text-muted-foreground">Gérez les comptes et leurs droits d'accès.</p>
         </div>
-        <Button onClick={() => setInviteOpen(true)}>
-          <UserPlus className="h-4 w-4 mr-2" /> Inviter un utilisateur
+        <Button onClick={() => setCreateOpen(true)}>
+          <UserPlus className="h-4 w-4 mr-2" /> Créer un utilisateur
         </Button>
       </div>
 
@@ -125,7 +151,7 @@ export default function UserManagement() {
                   <th className="text-left p-3">Rôle</th>
                   <th className="text-left p-3">Dernière connexion</th>
                   <th className="text-left p-3">Créé le</th>
-                  <th className="p-3 w-10"></th>
+                  <th className="p-3 w-20"></th>
                 </tr>
               </thead>
               <tbody>
@@ -159,17 +185,30 @@ export default function UserManagement() {
                         {u.created_at ? new Date(u.created_at).toLocaleDateString('fr-FR') : '—'}
                       </td>
                       <td className="p-3 text-right">
-                        {!isSelf && (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                            onClick={() => remove(u)}
-                            title="Supprimer"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
+                        <div className="flex justify-end gap-1">
+                          {!isSelf && (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                              onClick={() => resetPassword(u)}
+                              title="Réinitialiser le mot de passe"
+                            >
+                              <KeyRound className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {!isSelf && (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                              onClick={() => remove(u)}
+                              title="Supprimer"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -180,29 +219,29 @@ export default function UserManagement() {
         </CardContent>
       </Card>
 
-      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Inviter un utilisateur</DialogTitle>
+            <DialogTitle>Créer un utilisateur</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              L'utilisateur recevra un email avec un lien pour définir son mot de passe.
+              Un mot de passe temporaire sera généré et affiché une seule fois. Communiquez-le à l'utilisateur, il pourra le modifier après connexion.
             </p>
             <div className="space-y-2">
-              <Label htmlFor="invite-email">Email</Label>
+              <Label htmlFor="create-email">Email</Label>
               <Input
-                id="invite-email"
+                id="create-email"
                 type="email"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
+                value={createEmail}
+                onChange={(e) => setCreateEmail(e.target.value)}
                 placeholder="prenom.nom@addeus.ai"
                 autoFocus
               />
             </div>
             <div className="space-y-2">
               <Label>Rôle</Label>
-              <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as AppRole)}>
+              <Select value={createRole} onValueChange={(v) => setCreateRole(v as AppRole)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="admin">{ROLE_LABEL.admin} — peut tout faire dont gérer les users</SelectItem>
@@ -213,10 +252,34 @@ export default function UserManagement() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setInviteOpen(false)}>Annuler</Button>
-            <Button onClick={invite} disabled={!inviteEmail.trim() || submitting}>
-              {submitting ? 'Envoi…' : 'Envoyer l\'invitation'}
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>Annuler</Button>
+            <Button onClick={create} disabled={!createEmail.trim() || submitting}>
+              {submitting ? 'Création…' : 'Créer'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!credentials} onOpenChange={(open) => { if (!open) closeCredentials(); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{credentials?.title}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm">
+              Mot de passe pour <span className="font-medium">{credentials?.email}</span>. Copiez-le maintenant — il ne sera plus jamais affiché.
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 px-3 py-2 rounded-md bg-muted font-mono text-sm select-all">
+                {credentials?.password}
+              </code>
+              <Button size="icon" variant="outline" onClick={copyPassword} title="Copier">
+                {copied ? <Check className="h-4 w-4 text-badge-success-foreground" /> : <Copy className="h-4 w-4" />}
+              </Button>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={closeCredentials}>Fermer</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -6,8 +6,6 @@ import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { CountryFilterProvider } from "@/hooks/useCountryFilter";
 import AppLayout from "@/components/AppLayout";
 import Login from "@/pages/Login";
-import ResetPasswordRequest from "@/pages/ResetPasswordRequest";
-import UpdatePassword from "@/pages/UpdatePassword";
 import RapportDuJour from "@/pages/RapportDuJour";
 import Creances from "@/pages/Creances";
 import Clients from "@/pages/Clients";
@@ -59,9 +57,6 @@ const App = () => (
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
-            <Route path="/forgot-password" element={<ResetPasswordRequest />} />
-            <Route path="/update-password" element={<UpdatePassword />} />
-            <Route path="/set-password" element={<UpdatePassword />} />
             <Route path="/*" element={<ProtectedRoutes />} />
           </Routes>
         </BrowserRouter>

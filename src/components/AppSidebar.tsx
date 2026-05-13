@@ -1,7 +1,9 @@
-import { FileText, Users, Clock, BarChart3, LogOut, CheckCircle, Settings, Mail, Shield } from 'lucide-react';
+import { useState } from 'react';
+import { FileText, Users, Clock, BarChart3, LogOut, CheckCircle, Settings, Mail, Shield, KeyRound } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/hooks/useAuth';
+import { ChangePasswordModal } from '@/components/ChangePasswordModal';
 import {
   Sidebar,
   SidebarContent,
@@ -33,6 +35,7 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === 'collapsed';
   const { signOut, isAdmin } = useAuth();
+  const [passwordOpen, setPasswordOpen] = useState(false);
 
   return (
     <Sidebar collapsible="icon">
@@ -72,7 +75,7 @@ export function AppSidebar() {
               {!collapsed && <span className="ml-2">Admin</span>}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent side="top" align="start" className="w-48">
+          <DropdownMenuContent side="top" align="start" className="w-56">
             <DropdownMenuItem asChild>
               <Link to="/templates" className="cursor-pointer">
                 <Mail className="h-4 w-4 mr-2" /> Templates
@@ -85,6 +88,9 @@ export function AppSidebar() {
                 </Link>
               </DropdownMenuItem>
             )}
+            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setPasswordOpen(true); }} className="cursor-pointer">
+              <KeyRound className="h-4 w-4 mr-2" /> Mon mot de passe
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
         <Button variant="ghost" size={collapsed ? 'icon' : 'default'} onClick={signOut} className="w-full text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50 justify-start">
@@ -92,6 +98,7 @@ export function AppSidebar() {
           {!collapsed && <span className="ml-2">Déconnexion</span>}
         </Button>
       </SidebarFooter>
+      <ChangePasswordModal open={passwordOpen} onOpenChange={setPasswordOpen} />
     </Sidebar>
   );
 }
