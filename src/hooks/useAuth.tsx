@@ -13,6 +13,7 @@ interface AuthContextType {
   canWrite: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
+  changePassword: (newPassword: string) => Promise<{ error: Error | null }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -63,11 +64,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
   };
 
+  const changePassword = async (newPassword: string) => {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    return { error: error as Error | null };
+  };
+
   const isAdmin = role === 'admin';
   const canWrite = role === 'admin' || role === 'user';
 
   return (
-    <AuthContext.Provider value={{ session, user, loading, role, isAdmin, canWrite, signIn, signOut }}>
+    <AuthContext.Provider value={{ session, user, loading, role, isAdmin, canWrite, signIn, signOut, changePassword }}>
       {children}
     </AuthContext.Provider>
   );

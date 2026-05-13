@@ -1,6 +1,8 @@
-// Edge function admin pour gérer les comptes : lister, inviter, changer rôle,
-// supprimer. Tourne en service_role et bypass RLS — donc on vérifie nous-même
-// que l'appelant est bien admin avant chaque action.
+// Edge function admin pour gérer les comptes : lister, créer, changer rôle,
+// réinitialiser le mot de passe, supprimer. Tourne en service_role et bypass
+// RLS — donc on vérifie nous-même que l'appelant est bien admin avant chaque
+// action. Aucun email n'est envoyé : les mots de passe sont générés côté
+// serveur et renvoyés une seule fois à l'admin qui les communique au user.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.100.0";
@@ -13,11 +15,22 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
-const APP_URL = Deno.env.get('APP_URL') ?? '';
 
 type AppRole = 'admin' | 'user' | 'reader';
 
 const VALID_ROLES: AppRole[] = ['admin', 'user', 'reader'];
+
+// Caractères sans ambiguïté visuelle (pas de 0/O, 1/l/I).
+const PASSWORD_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+const PASSWORD_LENGTH = 16;
+
+function generatePassword(): string {
+  const bytes = new Uint8Array(PASSWORD_LENGTH);
+  crypto.getRandomValues(bytes);
+  let out = '';
+  for (const b of bytes) out += PASSWORD_ALPHABET[b % PASSWORD_ALPHABET.length];
+  return out;
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -74,32 +87,41 @@ serve(async (req) => {
         role: rolesByUser.get(u.id) ?? null,
         last_sign_in_at: u.last_sign_in_at,
         created_at: u.created_at,
-        invited_at: u.invited_at,
       }));
       return json({ users: result });
     }
 
-    if (action === 'invite') {
+    if (action === 'create') {
       const { email, role } = body as { email?: string; role?: AppRole };
       if (!email || !role || !VALID_ROLES.includes(role)) {
         return json({ error: 'email and a valid role are required' }, 400);
       }
-      const redirectTo = APP_URL ? `${APP_URL}/set-password` : undefined;
-      const { data: invited, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(
+      const password = generatePassword();
+      const { data: created, error: createErr } = await admin.auth.admin.createUser({
         email,
-        redirectTo ? { redirectTo } : undefined,
-      );
-      if (inviteErr || !invited.user) return json({ error: inviteErr?.message ?? 'invite failed' }, 500);
+        password,
+        email_confirm: true,
+      });
+      if (createErr || !created.user) return json({ error: createErr?.message ?? 'create failed' }, 500);
       const { error: insErr } = await admin.from('user_roles').insert({
-        user_id: invited.user.id,
+        user_id: created.user.id,
         role,
       });
       if (insErr) {
         // Rollback partiel : on supprime le user pour rester cohérent.
-        await admin.auth.admin.deleteUser(invited.user.id);
+        await admin.auth.admin.deleteUser(created.user.id);
         return json({ error: insErr.message }, 500);
       }
-      return json({ ok: true, user_id: invited.user.id });
+      return json({ ok: true, user_id: created.user.id, password });
+    }
+
+    if (action === 'reset_password') {
+      const { user_id } = body as { user_id?: string };
+      if (!user_id) return json({ error: 'user_id required' }, 400);
+      const password = generatePassword();
+      const { error: updErr } = await admin.auth.admin.updateUserById(user_id, { password });
+      if (updErr) return json({ error: updErr.message }, 500);
+      return json({ ok: true, password });
     }
 
     if (action === 'update_role') {
