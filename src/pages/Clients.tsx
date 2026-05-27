@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { useCountryFilter } from '@/hooks/useCountryFilter';
 import { CountryFilter } from '@/components/CountryFilter';
 import { useAuth } from '@/hooks/useAuth';
+import { fetchImputationsForFactures, indexImputations, resteDuSigne } from '@/lib/imputations';
 
 interface Client {
   id: string;
@@ -50,19 +51,24 @@ export default function Clients() {
     if (country !== 'all') clientsQuery = clientsQuery.ilike('code_client', `${country}_%`);
     const { data: clientsData } = await clientsQuery;
     // Tous types confondus en statut='en_cours' — NCRE/REC négatifs réduisent le reste dû
-    let facturesQuery = supabase.from('factures').select('client_id, solde_restant, montant, type_document, date_echeance')
+    let facturesQuery = supabase.from('factures').select('id, client_id, solde_restant, montant, type_document, date_echeance')
       .eq('statut', 'en_cours');
     if (maxMois) facturesQuery = facturesQuery.eq('mois_extraction', maxMois);
     const { data: facturesData } = await facturesQuery;
+
+    // Applique les imputations manuelles (idem Rapport du jour) pour cohérence des soldes.
+    const factureIds = (facturesData || []).map((f: any) => f.id);
+    const imputations = await fetchImputationsForFactures(factureIds).catch(() => []);
+    const idxImp = indexImputations(imputations);
 
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const facStats: Record<string, { count: number; total: number; totalOriginal: number; retardMax: number }> = {};
     (facturesData || []).forEach((f: any) => {
       if (!facStats[f.client_id]) facStats[f.client_id] = { count: 0, total: 0, totalOriginal: 0, retardMax: 0 };
       facStats[f.client_id].count++;
-      facStats[f.client_id].total += Number(f.solde_restant ?? f.montant ?? 0);
+      facStats[f.client_id].total += resteDuSigne(f, idxImp);
       facStats[f.client_id].totalOriginal += Number(f.montant ?? 0);
-      if (f.type_document === 'FACT' && f.date_echeance) {
+      if (f.type_document === 'FACT' && f.date_echeance && resteDuSigne(f, idxImp) > 0.001) {
         const ech = new Date(f.date_echeance); ech.setHours(0, 0, 0, 0);
         const jours = Math.floor((today.getTime() - ech.getTime()) / (1000 * 60 * 60 * 24));
         if (jours > facStats[f.client_id].retardMax) facStats[f.client_id].retardMax = jours;
